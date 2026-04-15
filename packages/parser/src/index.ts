@@ -1,0 +1,63 @@
+import { readFileSync, readdirSync, statSync } from 'fs'
+import { join, relative } from 'path'
+import { parseFile } from './parse-file.js'
+import type { GraphData, GraphNode, GraphEdge } from './types.js'
+
+export type { GraphData, GraphNode, GraphEdge } from './types.js'
+
+const EXTENSIONS = ['.tsx', '.jsx', '.ts', '.js']
+
+function collectFiles(dir: string): string[] {
+  const results: string[] = []
+  const IGNORE = ['node_modules', '.git', 'dist', 'build', '.next']
+
+  for (const entry of readdirSync(dir)) {
+    if (IGNORE.includes(entry)) continue
+    const full = join(dir, entry)
+    const stat = statSync(full)
+    if (stat.isDirectory()) {
+      results.push(...collectFiles(full))
+    } else if (EXTENSIONS.some((ext) => full.endsWith(ext))) {
+      results.push(full)
+    }
+  }
+  return results
+}
+
+export function parseProject(projectRoot: string): GraphData {
+  const files = collectFiles(projectRoot)
+  const allNodes: GraphNode[] = []
+  const allEdges: GraphEdge[] = []
+
+  for (const file of files) {
+    const code = readFileSync(file, 'utf-8')
+    const relPath = relative(projectRoot, file)
+    const { nodes, edges } = parseFile(code, relPath)
+    allNodes.push(...nodes)
+    allEdges.push(...edges)
+  }
+
+  // Deduplicate nodes by id (keep first occurrence)
+  const seen = new Set<string>()
+  const uniqueNodes = allNodes.filter((n) => {
+    if (seen.has(n.id)) return false
+    seen.add(n.id)
+    return true
+  })
+
+  // Remove edges referencing unknown nodes
+  const nodeIds = new Set(uniqueNodes.map((n) => n.id))
+  const validEdges = allEdges.filter(
+    (e) => nodeIds.has(e.source) && nodeIds.has(e.target),
+  )
+
+  // Deduplicate edges
+  const edgeSeen = new Set<string>()
+  const uniqueEdges = validEdges.filter((e) => {
+    if (edgeSeen.has(e.id)) return false
+    edgeSeen.add(e.id)
+    return true
+  })
+
+  return { nodes: uniqueNodes, edges: uniqueEdges }
+}
