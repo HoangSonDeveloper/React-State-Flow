@@ -1,0 +1,139 @@
+/**
+ * react-state-flow/runtime
+ *
+ * Import này TRƯỚC khi React mount để hook vào React DevTools global hook.
+ * Sends render events via WebSocket to the RSF CLI server.
+ *
+ * Usage:
+ *   import 'react-state-flow/runtime'   // top of main.tsx / index.tsx
+ */
+
+export interface RenderEvent {
+  type: 'render'
+  componentName: string
+  renderCount: number
+  timestamp: number
+}
+
+declare global {
+  interface Window {
+    __REACT_DEVTOOLS_GLOBAL_HOOK__: any
+    __RSF_WS__: WebSocket | null
+  }
+}
+
+const RSF_PORT = (window as any).__RSF_PORT__ ?? 7272
+const WS_URL = `ws://localhost:${RSF_PORT}/runtime`
+
+// B2: Render counter per component with max-size cap to prevent memory leak
+const renderCounts = new Map<string, number>()
+const MAX_RENDER_COUNT_ENTRIES = 500
+
+function incrementRenderCount(name: string): number {
+  if (!renderCounts.has(name) && renderCounts.size >= MAX_RENDER_COUNT_ENTRIES) {
+    // Evict oldest entry (insertion order)
+    const firstKey = renderCounts.keys().next().value
+    if (firstKey !== undefined) renderCounts.delete(firstKey)
+  }
+  const count = (renderCounts.get(name) ?? 0) + 1
+  renderCounts.set(name, count)
+  return count
+}
+
+function send(event: RenderEvent) {
+  if (!window.__RSF_WS__ || window.__RSF_WS__.readyState !== WebSocket.OPEN) return
+  window.__RSF_WS__.send(JSON.stringify(event))
+}
+
+// B3: Exponential backoff reconnect
+let reconnectDelay = 2000
+
+function connect() {
+  const ws = new WebSocket(WS_URL)
+  window.__RSF_WS__ = ws
+
+  ws.addEventListener('open', () => {
+    reconnectDelay = 2000  // reset on successful connection
+    renderCounts.clear()   // B2: sync counts with server on reconnect
+    console.debug('[RSF] Runtime connected')
+  })
+
+  ws.addEventListener('close', () => {
+    console.debug(`[RSF] Runtime disconnected, retrying in ${reconnectDelay / 1000}s...`)
+    setTimeout(connect, reconnectDelay)
+    reconnectDelay = Math.min(reconnectDelay * 2, 30_000)
+  })
+
+  ws.addEventListener('error', () => {
+    // suppress — will retry on close
+  })
+}
+
+function hookIntoReact() {
+  // React checks for this global hook on load and calls it during reconciliation
+  const existing = window.__REACT_DEVTOOLS_GLOBAL_HOOK__ ?? {}
+
+  const originalOnCommitFiberRoot =
+    existing.onCommitFiberRoot?.bind(existing) ?? (() => {})
+
+  window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+    ...existing,
+    isDisabled: false,
+    supportsFiber: true,
+
+    onCommitFiberRoot(rendererID: number, root: any, priorityLevel: any) {
+      // Call through so React DevTools still works
+      originalOnCommitFiberRoot(rendererID, root, priorityLevel)
+
+      // B1: Pass per-commit Set to avoid counting sibling instances multiple times
+      try {
+        walkFiber(root.current, new Set<string>())
+      } catch {
+        // Never break the app
+      }
+    },
+  }
+}
+
+function getFiberName(fiber: any): string | null {
+  const type = fiber?.type
+  if (!type) return null
+  if (typeof type === 'string') return null // DOM element
+  if (typeof type === 'function') return type.displayName ?? type.name ?? null
+  if (typeof type === 'object' && type !== null) {
+    // forwardRef, memo, etc.
+    return (
+      type.displayName ??
+      type.render?.displayName ??
+      type.render?.name ??
+      null
+    )
+  }
+  return null
+}
+
+// B1: seenInCommit prevents counting sibling instances multiple times per commit
+function walkFiber(fiber: any, seenInCommit: Set<string>) {
+  if (!fiber) return
+
+  const name = getFiberName(fiber)
+  if (name && /^[A-Z]/.test(name) && !seenInCommit.has(name)) {
+    seenInCommit.add(name)
+    const count = incrementRenderCount(name)
+    send({ type: 'render', componentName: name, renderCount: count, timestamp: Date.now() })
+  }
+
+  walkFiber(fiber.child, seenInCommit)
+  walkFiber(fiber.sibling, seenInCommit)
+}
+
+// Bootstrap — only in development
+const isDev =
+  typeof process !== 'undefined'
+    ? process.env.NODE_ENV !== 'production'
+    : (import.meta as any).env?.MODE !== 'production'
+
+if (typeof window !== 'undefined' && isDev) {
+  hookIntoReact()
+  connect()
+}

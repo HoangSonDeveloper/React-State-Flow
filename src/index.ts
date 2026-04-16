@@ -1,6 +1,8 @@
+#!/usr/bin/env node
 import { createServer } from 'http'
 import { existsSync } from 'fs'
-import { resolve, join } from 'path'
+import { resolve, join, dirname } from 'path'
+import { fileURLToPath } from 'url'
 import express from 'express'
 import { WebSocketServer } from 'ws'
 import open from 'open'
@@ -9,8 +11,10 @@ import chokidar from 'chokidar'
 import { parseProject } from './parser/index.js'
 import type { GraphData } from './parser/index.js'
 
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
 const PORT = 7272
-const UI_DIST = resolve(__dirname, 'ui')
+const UI_DIST = resolve(__dirname, '../ui/dist')
 const UI_DEV_PORT = 7273
 
 // C2: Render event history ring buffer — replayed to new UI connections
@@ -76,7 +80,7 @@ async function main() {
       res.send(`
         <html><body style="font-family:monospace;background:#0f1117;color:#e2e8f0;padding:32px">
           <p>UI not built yet. Run:</p>
-          <pre style="color:#22c55e">cd ui && npm run dev</pre>
+          <pre style="color:#22c55e">npm run build:ui</pre>
           <p>Then open <a style="color:#818cf8" href="http://localhost:${safeDevPort}">http://localhost:${safeDevPort}</a></p>
         </body></html>
       `)
@@ -87,7 +91,7 @@ async function main() {
 
   // --- WebSocket server ---
   // Two paths:
-  //   /runtime     ← receives events from @rsf/runtime (user's app)
+  //   /runtime     ← receives events from react-state-flow/runtime (user's app)
   //   /runtime-ui  ← pushes events to the UI browser
   const wss = new WebSocketServer({ server: httpServer })
 
@@ -127,7 +131,7 @@ async function main() {
     const url = `http://localhost:${PORT}`
     console.log(`  ${pc.green('✓')} Server running at ${pc.cyan(url)}`)
     console.log(`\n  ${pc.dim('Add runtime instrumentation to your app:')}`)
-    console.log(`  ${pc.yellow("import '@rsf/runtime'")}  ${pc.dim('// top of main.tsx')}\n`)
+    console.log(`  ${pc.yellow("import 'react-state-flow/runtime'")}  ${pc.dim('// top of main.tsx')}\n`)
 
     // Open browser
     open(url).catch(() => {})
