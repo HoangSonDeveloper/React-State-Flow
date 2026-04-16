@@ -83,6 +83,11 @@ function FlowCanvas() {
   // D5: Capture ReactFlow instance for imperative fitView
   const rfInstanceRef = useRef<any>(null)
 
+  // M3.4: Topology signature of last layout. When the new signature matches we
+  // keep existing node positions instead of triggering a full Dagre re-layout
+  // (avoids nodes jumping around when a file save changes only data, not structure).
+  const lastTopoSigRef = useRef<string>('')
+
   const handleNodeClick = useCallback(
     (_: MouseEvent, node: Node) => {
       if (!graph) return
@@ -143,7 +148,10 @@ function FlowCanvas() {
     }
   }, [graph, searchQuery, showContexts, showStores])
 
-  // D1 Effect 1: Rebuild layout when graph topology or filter changes
+  // D1 Effect 1: Rebuild layout when graph topology or filter changes.
+  // M3.4: When topology (node + edge id sets) is unchanged, keep existing node
+  // positions and only refresh static data fields. fitView is suppressed in that
+  // case so the user's pan/zoom isn't disturbed on every file save.
   useEffect(() => {
     if (!filteredGraph) return
     const emptyRuntime: RuntimeState = {
@@ -153,14 +161,29 @@ function FlowCanvas() {
       recentlyWasted: new Set(),
     }
     const rawNodes = buildFlowNodes(filteredGraph, emptyRuntime)
-    // Prune edges referencing nodes not in filtered set
     const nodeIds = new Set(filteredGraph.nodes.map((n) => n.id))
     const prunedGraph = { ...filteredGraph, edges: filteredGraph.edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target)) }
     const rawEdges = buildFlowEdges(prunedGraph)
+
+    const sortedNodeIds = [...nodeIds].sort().join(',')
+    const sortedEdgeIds = prunedGraph.edges.map((e) => e.id).sort().join(',')
+    const topoSig = `${sortedNodeIds}|${sortedEdgeIds}`
+    const topologyUnchanged = topoSig === lastTopoSigRef.current
+
+    if (topologyUnchanged) {
+      // Merge new static data into existing positioned nodes.
+      const dataById = new Map(rawNodes.map((n) => [n.id, n.data]))
+      setNodes((prev) =>
+        prev.map((n) => ({ ...n, data: { ...n.data, ...(dataById.get(n.id) ?? {}) } })),
+      )
+      setEdges(rawEdges)
+      return
+    }
+
+    lastTopoSigRef.current = topoSig
     const laidOut = applyDagreLayout(rawNodes, rawEdges)
     setNodes(laidOut)
     setEdges(rawEdges)
-    // D5: fitView after layout using requestAnimationFrame to ensure DOM is ready
     requestAnimationFrame(() => {
       rfInstanceRef.current?.fitView({ padding: 0.15, duration: 400 })
     })
