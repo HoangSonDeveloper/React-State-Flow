@@ -230,7 +230,160 @@ describe('JSX parent-child edges', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 5. Error handling
+// 5. Redux
+// ---------------------------------------------------------------------------
+
+describe('redux', () => {
+  it('creates ReduxStore node for configureStore', () => {
+    const code = `const store = configureStore({ reducer: rootReducer })`
+    const { nodes } = parseFile(code, FILE)
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0]).toMatchObject({
+      id: 'ReduxStore',
+      type: 'store',
+      storeLibrary: 'redux',
+    })
+  })
+
+  it('creates ReduxStore node for createStore', () => {
+    const code = `const store = createStore(rootReducer)`
+    const { nodes } = parseFile(code, FILE)
+    expect(nodes[0]).toMatchObject({
+      id: 'ReduxStore',
+      type: 'store',
+      storeLibrary: 'redux',
+    })
+  })
+
+  it('creates store-subscription edge for useSelector', () => {
+    const code = `
+      function Counter() {
+        const count = useSelector((s) => s.count)
+        return <div>{count}</div>
+      }
+    `
+    const { edges } = parseFile(code, FILE)
+    const sub = edges.find((e) => e.type === 'store-subscription')
+    expect(sub).toMatchObject({ source: 'ReduxStore', target: 'Counter' })
+  })
+
+  it('creates store-subscription edge for useDispatch', () => {
+    const code = `
+      function Button() {
+        const dispatch = useDispatch()
+        return <button />
+      }
+    `
+    const { edges } = parseFile(code, FILE)
+    const sub = edges.find((e) => e.type === 'store-subscription')
+    expect(sub).toMatchObject({ source: 'ReduxStore', target: 'Button' })
+  })
+
+  it('deduplicates store-subscription when component uses both useSelector and useDispatch', () => {
+    const code = `
+      function Counter() {
+        const count = useSelector((s) => s.count)
+        const dispatch = useDispatch()
+        return <div>{count}</div>
+      }
+    `
+    const { edges } = parseFile(code, FILE)
+    const subs = edges.filter((e) => e.type === 'store-subscription')
+    expect(subs).toHaveLength(1)
+  })
+
+  it('does not create subscription edge when component uses no redux hooks', () => {
+    const code = `function Plain() { return <div /> }`
+    const { edges } = parseFile(code, FILE)
+    expect(edges.filter((e) => e.type === 'store-subscription')).toHaveLength(0)
+  })
+
+  it('auto-creates virtual ReduxStore node when hooks used without store declaration', () => {
+    const code = `
+      function Counter() {
+        const count = useSelector((s) => s.count)
+        return <div>{count}</div>
+      }
+    `
+    const { nodes } = parseFile(code, FILE)
+    const storeNode = nodes.find((n) => n.id === 'ReduxStore')
+    expect(storeNode).toMatchObject({ type: 'store', storeLibrary: 'redux' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 6. Zustand
+// ---------------------------------------------------------------------------
+
+describe('zustand', () => {
+  it('creates store node from create() call, stripping use prefix', () => {
+    const code = `const useCountStore = create(() => ({ count: 0 }))`
+    const { nodes } = parseFile(code, FILE)
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0]).toMatchObject({
+      id: 'CountStore',
+      type: 'store',
+      storeLibrary: 'zustand',
+    })
+  })
+
+  it('creates store-subscription edge when component calls store hook', () => {
+    const code = `
+      const useCountStore = create(() => ({ count: 0 }))
+      function Counter() {
+        const count = useCountStore((s) => s.count)
+        return <div>{count}</div>
+      }
+    `
+    const { edges } = parseFile(code, FILE)
+    const sub = edges.find((e) => e.type === 'store-subscription')
+    expect(sub).toMatchObject({ source: 'CountStore', target: 'Counter' })
+  })
+
+  it('creates separate nodes for multiple stores', () => {
+    const code = `
+      const useCountStore = create(() => ({ count: 0 }))
+      const useUserStore = create(() => ({ name: '' }))
+    `
+    const { nodes } = parseFile(code, FILE)
+    const ids = nodes.map((n) => n.id).sort()
+    expect(ids).toEqual(['CountStore', 'UserStore'])
+  })
+
+  it('creates edges to multiple stores from the same component', () => {
+    const code = `
+      const useCountStore = create(() => ({ count: 0 }))
+      const useUserStore = create(() => ({ name: '' }))
+      function Dashboard() {
+        const count = useCountStore((s) => s.count)
+        const name = useUserStore((s) => s.name)
+        return <div />
+      }
+    `
+    const { edges } = parseFile(code, FILE)
+    const subs = edges.filter((e) => e.type === 'store-subscription')
+    const sources = subs.map((e) => e.source).sort()
+    expect(sources).toEqual(['CountStore', 'UserStore'])
+  })
+
+  it('does not create edge when component does not call store hook', () => {
+    const code = `
+      const useCountStore = create(() => ({ count: 0 }))
+      function Plain() { return <div /> }
+    `
+    const { edges } = parseFile(code, FILE)
+    expect(edges.filter((e) => e.type === 'store-subscription')).toHaveLength(0)
+  })
+
+  it('ignores create() call not assigned to a use-prefixed name', () => {
+    const code = `const store = create(() => ({ count: 0 }))`
+    const { nodes } = parseFile(code, FILE)
+    expect(nodes).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 7. Error handling
 // ---------------------------------------------------------------------------
 
 describe('error handling', () => {

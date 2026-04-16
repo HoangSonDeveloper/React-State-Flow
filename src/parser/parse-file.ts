@@ -54,6 +54,40 @@ function getContextUsages(path: any): string[] {
   return names
 }
 
+// Strip 'use' prefix from Zustand hook name to derive store node id.
+// useCountStore → CountStore
+function zustandHookToStoreId(hookName: string): string | null {
+  if (!/^use[A-Z]/.test(hookName)) return null
+  return hookName.slice(3)
+}
+
+function getStoreUsages(
+  path: any,
+  zustandHooks: Map<string, string>,
+): { storeIds: Set<string>; usesRedux: boolean } {
+  const storeIds = new Set<string>()
+  let usesRedux = false
+
+  path.traverse({
+    CallExpression(innerPath: any) {
+      const callee = innerPath.node.callee
+      if (!t.isIdentifier(callee)) return
+
+      // Redux hooks
+      if (callee.name === 'useSelector' || callee.name === 'useDispatch') {
+        usesRedux = true
+        return
+      }
+
+      // Zustand hook calls
+      const storeId = zustandHooks.get(callee.name)
+      if (storeId) storeIds.add(storeId)
+    },
+  })
+
+  return { storeIds, usesRedux }
+}
+
 // A1: Accept optional externalComponents for cross-file edge resolution
 export function parseFile(
   code: string,
@@ -78,11 +112,32 @@ export function parseFile(
   // Map: context variable name → node id
   const contextMap = new Map<string, string>()
 
+  // Map: zustand hook name (e.g. 'useCountStore') → store node id (e.g. 'CountStore')
+  const zustandHooks = new Map<string, string>()
+
+  // Tracks whether the virtual ReduxStore node has been added in this file
+  let reduxStoreAdded = false
+
   // Track component names found in this file for JSX child resolution
   const componentSet = new Set<string>()
 
   // A5: Use Set for O(1) edge deduplication
   const edgeIdSet = new Set<string>()
+
+  function ensureReduxStoreNode(line: number): void {
+    if (reduxStoreAdded) return
+    reduxStoreAdded = true
+    nodes.push({
+      id: 'ReduxStore',
+      type: 'store',
+      label: 'ReduxStore',
+      file: filePath,
+      line,
+      stateSlots: [],
+      isContextProvider: false,
+      storeLibrary: 'redux',
+    })
+  }
 
   function registerComponent(
     name: string,
@@ -153,31 +208,79 @@ export function parseFile(
       }
     }
 
+    // Store-subscription edges (Redux, Zustand)
+    const { storeIds, usesRedux } = getStoreUsages(path, zustandHooks)
+    if (usesRedux) {
+      ensureReduxStoreNode(line)
+      storeIds.add('ReduxStore')
+    }
+    for (const storeId of storeIds) {
+      const edgeId = `${storeId}->${name}`
+      if (!edgeIdSet.has(edgeId)) {
+        edgeIdSet.add(edgeId)
+        edges.push({
+          id: edgeId,
+          source: storeId,
+          target: name,
+          type: 'store-subscription',
+        })
+      }
+    }
+
     return node
   }
 
-  // First pass: find createContext calls to build contextMap
+  // First pass: find createContext calls + store declarations (Zustand, Redux)
   traverse(ast, {
     VariableDeclarator(path: any) {
-      if (
-        t.isCallExpression(path.node.init) &&
-        t.isIdentifier((path.node.init as t.CallExpression).callee, {
-          name: 'createContext',
-        }) &&
-        t.isIdentifier(path.node.id)
-      ) {
-        const ctxVarName = path.node.id.name
-        const nodeId = ctxVarName
-        contextMap.set(ctxVarName, nodeId)
+      const init = path.node.init
+      const id = path.node.id
+      if (!t.isCallExpression(init) || !t.isIdentifier(id)) return
+
+      const callee = (init as t.CallExpression).callee
+      const line = path.node.loc?.start.line ?? 0
+
+      // createContext → context node
+      if (t.isIdentifier(callee, { name: 'createContext' })) {
+        const ctxVarName = id.name
+        contextMap.set(ctxVarName, ctxVarName)
         nodes.push({
-          id: nodeId,
+          id: ctxVarName,
           type: 'context',
           label: ctxVarName,
           file: filePath,
-          line: path.node.loc?.start.line ?? 0,
+          line,
           stateSlots: [],
           isContextProvider: false,
         })
+        return
+      }
+
+      // Zustand: const useXxxStore = create(...)
+      if (t.isIdentifier(callee, { name: 'create' })) {
+        const storeId = zustandHookToStoreId(id.name)
+        if (storeId) {
+          zustandHooks.set(id.name, storeId)
+          nodes.push({
+            id: storeId,
+            type: 'store',
+            label: storeId,
+            file: filePath,
+            line,
+            stateSlots: [],
+            isContextProvider: false,
+            storeLibrary: 'zustand',
+          })
+        }
+        return
+      }
+
+      // Redux: const store = configureStore(...) | createStore(...)
+      if (
+        t.isIdentifier(callee, { name: 'configureStore' }) ||
+        t.isIdentifier(callee, { name: 'createStore' })
+      ) {
+        ensureReduxStoreNode(line)
       }
     },
   })

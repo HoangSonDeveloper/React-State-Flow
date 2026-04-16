@@ -1,4 +1,4 @@
-export type NodeType = 'component' | 'context'
+export type NodeType = 'component' | 'context' | 'store'
 
 export interface GraphNode {
   id: string
@@ -9,9 +9,10 @@ export interface GraphNode {
   stateSlots: string[]       // useState/useReducer variable names
   isContextProvider: boolean
   contextName?: string       // which context it provides/consumes
+  storeLibrary?: 'redux' | 'zustand'
 }
 
-export type EdgeType = 'parent-child' | 'context-subscription' | 'context-provision'
+export type EdgeType = 'parent-child' | 'context-subscription' | 'context-provision' | 'store-subscription'
 
 export interface GraphEdge {
   id: string
