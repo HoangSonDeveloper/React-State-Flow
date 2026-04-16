@@ -6,15 +6,16 @@ const traverse = (_traverse as any).default ?? _traverse
 
 /**
  * Zustand detector.
- *   - Phase 1: finds `const useXxxStore = create(…)` → adds store node named XxxStore.
+ *   - Phase 1: finds `const useXxxStore = create(…)` → adds store node named XxxStore
+ *     and records the hook→store mapping in `ctx.globalStores` so cross-file
+ *     component files can resolve the hook in phase 2.
  *     Only variables matching `use[A-Z]...` are considered; the `use` prefix is stripped
  *     to form the node id.
- *   - Phase 2: for each component, if it calls a known Zustand hook, adds a
- *     store-subscription edge.
+ *   - Phase 2: for each component, if it calls a hook registered in `ctx.globalStores`,
+ *     adds a store-subscription edge.
  */
 export class ZustandDetector implements Detector {
   readonly name = 'zustand'
-  private readonly hookToStoreId = new Map<string, string>()
 
   detectDeclarations(ctx: ParseContext): void {
     traverse(ctx.ast, {
@@ -29,7 +30,7 @@ export class ZustandDetector implements Detector {
         const storeId = stripUsePrefix(id.name)
         if (!storeId) return
 
-        this.hookToStoreId.set(id.name, storeId)
+        ctx.globalStores.set(id.name, storeId)
         ctx.addNode({
           id: storeId,
           type: 'store',
@@ -46,7 +47,7 @@ export class ZustandDetector implements Detector {
 
   enrichComponent(component: ComponentInfo, ctx: ParseContext): void {
     const storeIds = new Set<string>()
-    const hookMap = this.hookToStoreId
+    const hookMap = ctx.globalStores
     component.path.traverse({
       CallExpression(innerPath: any) {
         const callee = innerPath.node.callee

@@ -380,6 +380,29 @@ describe('zustand', () => {
     const { nodes } = parseFile(code, FILE)
     expect(nodes).toHaveLength(0)
   })
+
+  it('creates edge for cross-file store hook via shared registry', () => {
+    const globalStores = new Map<string, string>()
+    // File A declares the store.
+    parseFile(
+      `const useUiStore = create(() => ({ open: true }))`,
+      'src/store/useUiStore.ts',
+      undefined,
+      globalStores,
+    )
+    // File B consumes the hook — no declaration in scope.
+    const { edges } = parseFile(
+      `function Sidebar() {
+         const open = useUiStore((s) => s.open)
+         return <aside />
+       }`,
+      'src/Sidebar.tsx',
+      undefined,
+      globalStores,
+    )
+    const sub = edges.find((e) => e.type === 'store-subscription')
+    expect(sub).toMatchObject({ source: 'UiStore', target: 'Sidebar' })
+  })
 })
 
 // ---------------------------------------------------------------------------

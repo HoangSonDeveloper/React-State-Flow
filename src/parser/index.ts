@@ -27,12 +27,17 @@ function collectFiles(dir: string): string[] {
 export function parseProject(projectRoot: string): GraphData {
   const files = collectFiles(projectRoot)
 
+  // Shared across both passes: hook name → store node id, populated as each
+  // file's detectors run. Lets cross-file store hooks resolve in pass 2 even
+  // when the `create()` declaration lives in a different file.
+  const globalStores = new Map<string, string>()
+
   // Pass 1: collect all component node ids for cross-file edge resolution
   const globalComponentSet = new Set<string>()
   for (const file of files) {
     const code = readFileSync(file, 'utf-8')
     const relPath = relative(projectRoot, file)
-    const { nodes } = parseFile(code, relPath)
+    const { nodes } = parseFile(code, relPath, undefined, globalStores)
     for (const n of nodes) {
       if (n.type === 'component') globalComponentSet.add(n.id)
     }
@@ -44,7 +49,7 @@ export function parseProject(projectRoot: string): GraphData {
   for (const file of files) {
     const code = readFileSync(file, 'utf-8')
     const relPath = relative(projectRoot, file)
-    const { nodes, edges } = parseFile(code, relPath, globalComponentSet)
+    const { nodes, edges } = parseFile(code, relPath, globalComponentSet, globalStores)
     allNodes.push(...nodes)
     allEdges.push(...edges)
   }
