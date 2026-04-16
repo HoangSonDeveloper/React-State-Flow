@@ -7,6 +7,14 @@
   "bin": {
     "react-state-flow": "./dist/index.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HoangSonDeveloper/React-State-Flow"
+  },
+  "homepage": "https://github.com/HoangSonDeveloper/React-State-Flow",
+  "bugs": {
+    "url": "https://github.com/HoangSonDeveloper/React-State-Flow/issues"
+  },
   "keywords": [
     "react",
     "devtools",
