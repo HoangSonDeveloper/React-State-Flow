@@ -1,0 +1,192 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #f1f5f9;
+}
+
+.layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  transition: background 0.2s, color 0.2s;
+}
+.layout--light {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+.layout--dark {
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+}
+.header h1 {
+  margin: 0;
+  font-size: 18px;
+}
+.header-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.user {
+  font-size: 14px;
+  opacity: 0.8;
+}
+.hamburger,
+.theme-toggle {
+  background: transparent;
+  border: 1px solid currentColor;
+  color: inherit;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.layout-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 260px;
+  padding: 16px;
+  border-right: 1px solid rgba(148, 163, 184, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.sidebar h2 {
+  margin: 0;
+  font-size: 14px;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.filter-bar,
+.add-task-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.filter-bar label,
+.add-task-form label {
+  font-size: 12px;
+  opacity: 0.7;
+}
+.filter-bar input,
+.add-task-form input {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.add-task-form button {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #6366f1;
+  background: #6366f1;
+  color: white;
+  cursor: pointer;
+}
+.error {
+  font-size: 12px;
+  color: #ef4444;
+}
+
+.board {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  padding: 16px;
+  overflow: auto;
+}
+
+.column {
+  background: rgba(148, 163, 184, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+}
+.column h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.count {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 12px;
+}
+
+.column-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-card {
+  background: white;
+  padding: 10px;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.task-card--dark {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+.task-card input {
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid #6366f1;
+  font: inherit;
+  background: transparent;
+  color: inherit;
+}
+.task-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.task-actions button {
+  background: transparent;
+  border: 1px solid currentColor;
+  color: inherit;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.task-actions .danger {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+.empty {
+  font-size: 12px;
+  opacity: 0.5;
+  margin: 0;
+}
