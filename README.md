@@ -105,6 +105,13 @@ The graph updates automatically when you save source files (no restart needed).
 | Redux Toolkit | `configureStore`, `createStore`, `useSelector`, `useDispatch` |
 | Zustand | `create()` + any `useXxxStore` hook |
 
+## Pause & reset
+
+The header has two controls that affect render tracking globally:
+
+- **❚❚ Pause / ▶ Resume** — temporarily stops processing live render events in the UI. Counts and highlights freeze; the graph is still interactive. The runtime keeps sending events; they're discarded until you resume.
+- **↺ Reset** — clears render counts and wasted-render counts everywhere (UI, server history, runtime in your app). Useful when you want to reproduce an interaction with a clean baseline.
+
 ## Search & filter
 
 Use the search bar (or press `⌘K` / `Ctrl+K`) to filter nodes by name. Toggle the **context** and **store** chips to show/hide those node types.

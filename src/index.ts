@@ -71,6 +71,7 @@ async function main() {
   // --- HTTP + WS server ---
   const app = express()
   const uiClients = new Set<any>()
+  const runtimeClients = new Set<any>()
 
   // Serve graph data
   app.get('/api/graph', (_req, res) => {
@@ -122,12 +123,29 @@ async function main() {
       if (renderHistory.length > 0) {
         ws.send(JSON.stringify({ type: 'history', events: renderHistory }))
       }
+      // M2.3: Handle UI-originated control messages (currently: reset)
+      ws.on('message', (raw) => {
+        try {
+          const msg = JSON.parse(raw.toString())
+          if (msg.type === 'reset') {
+            renderHistory.length = 0
+            const payload = JSON.stringify({ type: 'reset' })
+            for (const client of uiClients) {
+              if (client.readyState === 1) client.send(payload)
+            }
+            for (const client of runtimeClients) {
+              if (client.readyState === 1) client.send(payload)
+            }
+          }
+        } catch {}
+      })
       ws.on('close', () => uiClients.delete(ws))
       return
     }
 
     if (path === '/runtime') {
       // User app runtime connecting
+      runtimeClients.add(ws)
       ws.on('message', (raw) => {
         const str = raw.toString()
         // C2: Store render events for history replay
@@ -140,6 +158,7 @@ async function main() {
           if (client.readyState === 1) client.send(str)
         }
       })
+      ws.on('close', () => runtimeClients.delete(ws))
       return
     }
   })

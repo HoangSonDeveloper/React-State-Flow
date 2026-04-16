@@ -6,10 +6,16 @@ const FLASH_DURATION = 800 // ms
 // D6: Use RSF_PORT from window config instead of hardcoded value
 const RSF_PORT = (window as any).__RSF_PORT__ ?? 7272
 
+export interface RuntimeBridgeApi {
+  /** Request a global counter reset; server broadcasts to all clients. */
+  reset(): void
+}
+
 export function useRuntimeBridge(
   onUpdate: (state: RuntimeState) => void,
   onGraphUpdate?: (graph: GraphData) => void,
-) {
+  options: { paused?: boolean } = {},
+): RuntimeBridgeApi {
   const stateRef = useRef<RuntimeState>({
     renderCounts: {},
     recentlyRendered: new Set(),
@@ -17,6 +23,10 @@ export function useRuntimeBridge(
     recentlyWasted: new Set(),
   })
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const wsRef = useRef<WebSocket | null>(null)
+  // Read paused via ref so flag changes don't tear down the WebSocket.
+  const pausedRef = useRef(options.paused ?? false)
+  pausedRef.current = options.paused ?? false
 
   const handleEvent = useCallback(
     (event: RenderEvent) => {
@@ -69,18 +79,20 @@ export function useRuntimeBridge(
   )
 
   useEffect(() => {
-    let ws: WebSocket | null = null
     let destroyed = false
     let reconnectDelay = 2000  // B3 (UI side): exponential backoff
 
     function connect() {
       if (destroyed) return
-      ws = new WebSocket(`ws://${window.location.hostname}:${RSF_PORT}/runtime-ui`)
+      const ws = new WebSocket(`ws://${window.location.hostname}:${RSF_PORT}/runtime-ui`)
+      wsRef.current = ws
 
       ws.addEventListener('message', (e) => {
         try {
           const msg = JSON.parse(e.data)
           if (msg.type === 'render') {
+            // M2.3: skip live render events when paused (counts/flash freeze)
+            if (pausedRef.current) return
             handleEvent(msg as RenderEvent)
           } else if (msg.type === 'graph-update' && onGraphUpdate) {
             // D2: CLI pushed a new graph due to file change
@@ -92,6 +104,22 @@ export function useRuntimeBridge(
             }
             // Emit one update with all replayed counts, no flash
             onUpdate({ ...stateRef.current, recentlyRendered: new Set(), recentlyWasted: new Set() })
+          } else if (msg.type === 'reset') {
+            // M2.3: server confirmed reset — clear local state + flash timers
+            timersRef.current.forEach(clearTimeout)
+            timersRef.current.clear()
+            stateRef.current = {
+              renderCounts: {},
+              recentlyRendered: new Set(),
+              wastedCounts: {},
+              recentlyWasted: new Set(),
+            }
+            onUpdate({
+              renderCounts: {},
+              recentlyRendered: new Set(),
+              wastedCounts: {},
+              recentlyWasted: new Set(),
+            })
           }
         } catch {}
       })
@@ -101,6 +129,7 @@ export function useRuntimeBridge(
       })
 
       ws.addEventListener('close', () => {
+        wsRef.current = null
         if (!destroyed) {
           setTimeout(connect, reconnectDelay)
           reconnectDelay = Math.min(reconnectDelay * 2, 30_000)
@@ -112,8 +141,17 @@ export function useRuntimeBridge(
 
     return () => {
       destroyed = true
-      ws?.close()
+      wsRef.current?.close()
       timersRef.current.forEach(clearTimeout)
     }
   }, [handleEvent, handleHistoricalEvent, onUpdate, onGraphUpdate])
+
+  const reset = useCallback(() => {
+    const ws = wsRef.current
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'reset' }))
+    }
+  }, [])
+
+  return { reset }
 }

@@ -61,6 +61,15 @@ function connect() {
     console.debug('[RSF] Runtime connected')
   })
 
+  // M2.3: server broadcasts {type:'reset'} when UI clicks Reset; clear local
+  // counters so the next render event starts at 1 (not at the prior count + 1).
+  ws.addEventListener('message', (e) => {
+    try {
+      const msg = JSON.parse(e.data)
+      if (msg?.type === 'reset') renderCounts.clear()
+    } catch {}
+  })
+
   ws.addEventListener('close', () => {
     console.debug(`[RSF] Runtime disconnected, retrying in ${reconnectDelay / 1000}s...`)
     setTimeout(connect, reconnectDelay)
