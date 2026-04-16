@@ -10,10 +10,10 @@ import pc from 'picocolors'
 import chokidar from 'chokidar'
 import { parseProject } from './parser/index.js'
 import type { GraphData } from './parser/index.js'
+import { parseArgs } from './cli-args.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-const PORT = 7272
 const UI_DIST = resolve(__dirname, '../ui/dist')
 const UI_DEV_PORT = 7273
 
@@ -41,23 +41,8 @@ const EDITOR_SCHEMES: Record<string, string> = {
   zed:       'zed://file/{path}:{line}',
 }
 
-function parseArgs(argv: string[]) {
-  const positional: string[] = []
-  let editor = 'vscode'
-
-  for (const arg of argv) {
-    if (arg.startsWith('--editor=')) {
-      editor = arg.slice('--editor='.length)
-    } else if (!arg.startsWith('--')) {
-      positional.push(arg)
-    }
-  }
-
-  return { targetPath: positional[0] ?? '.', editor }
-}
-
 async function main() {
-  const { targetPath, editor } = parseArgs(process.argv.slice(2))
+  const { targetPath, editor, port, open: shouldOpen, ignore } = parseArgs(process.argv.slice(2))
   const targetDir = resolve(targetPath)
   const editorScheme = EDITOR_SCHEMES[editor] ?? EDITOR_SCHEMES.vscode
   // Sanitize for injection into <script> tag (alphanumeric + colon/slash/braces only)
@@ -74,7 +59,7 @@ async function main() {
   // C3: Wrap initial parse in try-catch so server still starts on parse errors
   let graph: GraphData = { projectRoot: targetDir, nodes: [], edges: [] }
   try {
-    graph = parseProject(targetDir)
+    graph = parseProject(targetDir, { ignore })
     console.log(
       `  ${pc.green('✓')} Found ${pc.white(graph.nodes.length)} nodes, ${pc.white(graph.edges.length)} edges`,
     )
@@ -86,6 +71,7 @@ async function main() {
   // --- HTTP + WS server ---
   const app = express()
   const uiClients = new Set<any>()
+  const runtimeClients = new Set<any>()
 
   // Serve graph data
   app.get('/api/graph', (_req, res) => {
@@ -137,12 +123,29 @@ async function main() {
       if (renderHistory.length > 0) {
         ws.send(JSON.stringify({ type: 'history', events: renderHistory }))
       }
+      // M2.3: Handle UI-originated control messages (currently: reset)
+      ws.on('message', (raw) => {
+        try {
+          const msg = JSON.parse(raw.toString())
+          if (msg.type === 'reset') {
+            renderHistory.length = 0
+            const payload = JSON.stringify({ type: 'reset' })
+            for (const client of uiClients) {
+              if (client.readyState === 1) client.send(payload)
+            }
+            for (const client of runtimeClients) {
+              if (client.readyState === 1) client.send(payload)
+            }
+          }
+        } catch {}
+      })
       ws.on('close', () => uiClients.delete(ws))
       return
     }
 
     if (path === '/runtime') {
       // User app runtime connecting
+      runtimeClients.add(ws)
       ws.on('message', (raw) => {
         const str = raw.toString()
         // C2: Store render events for history replay
@@ -155,18 +158,18 @@ async function main() {
           if (client.readyState === 1) client.send(str)
         }
       })
+      ws.on('close', () => runtimeClients.delete(ws))
       return
     }
   })
 
-  httpServer.listen(PORT, () => {
-    const url = `http://localhost:${PORT}`
+  httpServer.listen(port, () => {
+    const url = `http://localhost:${port}`
     console.log(`  ${pc.green('✓')} Server running at ${pc.cyan(url)}`)
     console.log(`\n  ${pc.dim('Add runtime instrumentation to your app:')}`)
     console.log(`  ${pc.yellow("import 'react-state-flow/runtime'")}  ${pc.dim('// top of main.tsx')}\n`)
 
-    // Open browser
-    open(url).catch(() => {})
+    if (shouldOpen) open(url).catch(() => {})
   })
 
   // C1: File watching — re-parse on source changes and push updated graph to UI
@@ -177,7 +180,7 @@ async function main() {
     if (reparsTimer) clearTimeout(reparsTimer)
     reparsTimer = setTimeout(() => {
       try {
-        graph = parseProject(targetDir)
+        graph = parseProject(targetDir, { ignore })
         console.log(pc.cyan(`  [RSF] Graph updated: ${graph.nodes.length} nodes, ${graph.edges.length} edges`))
         const payload = JSON.stringify({ type: 'graph-update', graph })
         for (const client of uiClients) {
@@ -189,9 +192,17 @@ async function main() {
     }, 300)
   }
 
+  // Build chokidar ignore regex: built-in paths + user --ignore entries (escaped).
+  const extraIgnorePattern = ignore
+    .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|')
+  const ignoreRegex = extraIgnorePattern
+    ? new RegExp(`(node_modules|\\.git|dist|build|\\.next|${extraIgnorePattern})`)
+    : /(node_modules|\.git|dist|build|\.next)/
+
   chokidar
     .watch(targetDir, {
-      ignored: /(node_modules|\.git|dist|build|\.next)/,
+      ignored: ignoreRegex,
       persistent: true,
       ignoreInitial: true,
     })

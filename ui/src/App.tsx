@@ -69,6 +69,7 @@ function FlowCanvas() {
   const [searchQuery, setSearchQuery] = useState('')
   const [showContexts, setShowContexts] = useState(true)
   const [showStores, setShowStores] = useState(true)
+  const [paused, setPaused] = useState(false)
   const [runtime, setRuntime] = useState<RuntimeState>({
     renderCounts: {},
     recentlyRendered: new Set(),
@@ -192,7 +193,7 @@ function FlowCanvas() {
     setGraph(newGraph)
   }, [])
 
-  useRuntimeBridge(handleRuntimeUpdate, handleGraphUpdate)
+  const { reset: resetRuntime } = useRuntimeBridge(handleRuntimeUpdate, handleGraphUpdate, { paused })
 
   if (error) {
     return (
@@ -243,6 +244,42 @@ function FlowCanvas() {
           showStores={showStores}
           onToggleStores={() => setShowStores((v) => !v)}
         />
+        <button
+          onClick={() => setPaused((v) => !v)}
+          title={paused ? 'Resume render tracking' : 'Pause render tracking'}
+          style={{
+            fontSize: 11,
+            padding: '3px 9px',
+            borderRadius: 4,
+            border: `1px solid ${paused ? '#f59e0b' : '#2e3348'}`,
+            background: paused ? '#2a1f0e' : 'transparent',
+            color: paused ? '#fcd34d' : '#94a3b8',
+            cursor: 'pointer',
+            fontFamily: 'monospace',
+            userSelect: 'none',
+            transition: 'all 0.15s',
+          }}
+        >
+          {paused ? '▶ Resume' : '❚❚ Pause'}
+        </button>
+        <button
+          onClick={resetRuntime}
+          title="Clear render counts (server + runtime + UI)"
+          style={{
+            fontSize: 11,
+            padding: '3px 9px',
+            borderRadius: 4,
+            border: '1px solid #2e3348',
+            background: 'transparent',
+            color: '#94a3b8',
+            cursor: 'pointer',
+            fontFamily: 'monospace',
+            userSelect: 'none',
+            transition: 'all 0.15s',
+          }}
+        >
+          ↺ Reset
+        </button>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 12, alignItems: 'center', fontSize: 11, color: '#64748b' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ width: 8, height: 8, borderRadius: 999, background: '#334155', display: 'inline-block' }} />

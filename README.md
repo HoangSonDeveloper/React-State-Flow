@@ -74,10 +74,10 @@ react-state-flow [directory] [options]
 | `directory` | `.` | Path to your React source directory |
 | `--port=<n>` | `7272` | Port for the CLI server |
 | `--no-open` | — | Skip auto-opening the browser |
-| `--ignore=<glob>` | — | Extra paths to ignore (comma-separated) |
+| `--ignore=<names>` | — | Extra directory names to skip, comma-separated (e.g. `tests,fixtures`) |
 | `--editor=<name>` | `vscode` | Editor for click-to-open: `vscode`, `cursor`, `webstorm`, `zed` |
 
-The CLI runs on port `7272`. Your app's Vite dev server can run on any other port.
+The CLI defaults to port `7272`; override with `--port`. Your app's Vite dev server can run on any other port.
 
 ## What the graph shows
 
@@ -104,6 +104,13 @@ The graph updates automatically when you save source files (no restart needed).
 | React Context | `createContext`, `useContext`, `Context.Provider` |
 | Redux Toolkit | `configureStore`, `createStore`, `useSelector`, `useDispatch` |
 | Zustand | `create()` + any `useXxxStore` hook |
+
+## Pause & reset
+
+The header has two controls that affect render tracking globally:
+
+- **❚❚ Pause / ▶ Resume** — temporarily stops processing live render events in the UI. Counts and highlights freeze; the graph is still interactive. The runtime keeps sending events; they're discarded until you resume.
+- **↺ Reset** — clears render counts and wasted-render counts everywhere (UI, server history, runtime in your app). Useful when you want to reproduce an interaction with a clean baseline.
 
 ## Search & filter
 

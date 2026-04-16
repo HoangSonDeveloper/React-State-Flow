@@ -406,7 +406,130 @@ describe('zustand', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 7. Error handling
+// 7. Class components
+// ---------------------------------------------------------------------------
+
+describe('class components', () => {
+  it('detects class extending React.Component', () => {
+    const code = `
+      class Counter extends React.Component {
+        render() { return <div /> }
+      }
+    `
+    const { nodes } = parseFile(code, FILE)
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0]).toMatchObject({ id: 'Counter', type: 'component' })
+  })
+
+  it('detects class extending bare Component', () => {
+    const code = `
+      class Counter extends Component {
+        render() { return <div /> }
+      }
+    `
+    const { nodes } = parseFile(code, FILE)
+    expect(nodes[0]).toMatchObject({ id: 'Counter', type: 'component' })
+  })
+
+  it('detects class extending React.PureComponent', () => {
+    const code = `
+      class Counter extends React.PureComponent {
+        render() { return <div /> }
+      }
+    `
+    const { nodes } = parseFile(code, FILE)
+    expect(nodes[0]).toMatchObject({ id: 'Counter', type: 'component' })
+  })
+
+  it('detects class extending bare PureComponent', () => {
+    const code = `
+      class Counter extends PureComponent {
+        render() { return <div /> }
+      }
+    `
+    const { nodes } = parseFile(code, FILE)
+    expect(nodes[0]).toMatchObject({ id: 'Counter', type: 'component' })
+  })
+
+  it('ignores class not extending a React base class', () => {
+    const code = `
+      class Bus extends EventEmitter {
+        render() { return <div /> }
+      }
+    `
+    const { nodes } = parseFile(code, FILE)
+    expect(nodes).toHaveLength(0)
+  })
+
+  it('extracts state slots from class field', () => {
+    const code = `
+      class Counter extends Component {
+        state = { count: 0, name: '' }
+        render() { return <div /> }
+      }
+    `
+    const { nodes } = parseFile(code, FILE)
+    expect(nodes[0].stateSlots).toEqual(['count', 'name'])
+  })
+
+  it('extracts state slots from constructor this.state assignment', () => {
+    const code = `
+      class Counter extends Component {
+        constructor(props) {
+          super(props)
+          this.state = { count: 0 }
+        }
+        render() { return <div /> }
+      }
+    `
+    const { nodes } = parseFile(code, FILE)
+    expect(nodes[0].stateSlots).toEqual(['count'])
+  })
+
+  it('creates context-subscription edge for static contextType', () => {
+    const code = `
+      const ThemeContext = createContext(null)
+      class Button extends Component {
+        static contextType = ThemeContext
+        render() { return <button /> }
+      }
+    `
+    const { edges } = parseFile(code, FILE)
+    const sub = edges.find((e) => e.type === 'context-subscription')
+    expect(sub).toMatchObject({ source: 'ThemeContext', target: 'Button' })
+  })
+
+  it('marks class as context provider when rendering Context.Provider', () => {
+    const code = `
+      const ThemeContext = createContext(null)
+      class ThemeProvider extends Component {
+        render() {
+          return <ThemeContext.Provider value="dark">{this.props.children}</ThemeContext.Provider>
+        }
+      }
+    `
+    const { nodes, edges } = parseFile(code, FILE)
+    const provider = nodes.find((n) => n.id === 'ThemeProvider')
+    expect(provider?.isContextProvider).toBe(true)
+    const provision = edges.find((e) => e.type === 'context-provision')
+    expect(provision).toMatchObject({ source: 'ThemeProvider', target: 'ThemeContext' })
+  })
+
+  it('creates parent-child edge from class render() to child component', () => {
+    const code = `
+      function Child() { return <span /> }
+      class Parent extends Component {
+        render() { return <Child /> }
+      }
+    `
+    const { edges } = parseFile(code, FILE)
+    const parentChild = edges.find((e) => e.type === 'parent-child')
+    expect(parentChild).toMatchObject({ source: 'Parent', target: 'Child' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 8. Error handling
 // ---------------------------------------------------------------------------
 
 describe('error handling', () => {

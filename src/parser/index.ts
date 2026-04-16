@@ -12,17 +12,17 @@ export interface GraphData {
 }
 
 const EXTENSIONS = ['.tsx', '.jsx', '.ts', '.js']
+const DEFAULT_IGNORES = ['node_modules', '.git', 'dist', 'build', '.next']
 
-function collectFiles(dir: string): string[] {
+function collectFiles(dir: string, ignores: ReadonlySet<string>): string[] {
   const results: string[] = []
-  const IGNORE = ['node_modules', '.git', 'dist', 'build', '.next']
 
   for (const entry of readdirSync(dir)) {
-    if (IGNORE.includes(entry)) continue
+    if (ignores.has(entry)) continue
     const full = join(dir, entry)
     const stat = statSync(full)
     if (stat.isDirectory()) {
-      results.push(...collectFiles(full))
+      results.push(...collectFiles(full, ignores))
     } else if (EXTENSIONS.some((ext) => full.endsWith(ext))) {
       results.push(full)
     }
@@ -30,8 +30,14 @@ function collectFiles(dir: string): string[] {
   return results
 }
 
-export function parseProject(projectRoot: string): GraphData {
-  const files = collectFiles(projectRoot)
+export interface ParseProjectOptions {
+  /** Extra directory names to skip (merged with the built-in ignore list). */
+  ignore?: string[]
+}
+
+export function parseProject(projectRoot: string, options: ParseProjectOptions = {}): GraphData {
+  const ignores = new Set([...DEFAULT_IGNORES, ...(options.ignore ?? [])])
+  const files = collectFiles(projectRoot, ignores)
 
   // Shared across both passes: hook name → store node id, populated as each
   // file's detectors run. Lets cross-file store hooks resolve in pass 2 even
