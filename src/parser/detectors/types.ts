@@ -24,6 +24,13 @@ export interface ParseContext {
   readonly ast: t.File
   readonly filePath: string
   readonly externalComponents?: ReadonlySet<string>
+  /**
+   * Shared registry of store-hook names → store node id, populated across files.
+   * Used by detectors (e.g. Zustand) whose hook names are user-defined and must
+   * be resolved even when the hook is consumed in a different file than the
+   * `create()` declaration.
+   */
+  readonly globalStores: Map<string, string>
   addNode(node: GraphNode): void
   addEdge(edge: GraphEdge): void
   hasNode(id: string): boolean

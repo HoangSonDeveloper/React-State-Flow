@@ -21,6 +21,7 @@ export function parseFile(
   code: string,
   filePath: string,
   externalComponents?: Set<string>,
+  globalStores: Map<string, string> = new Map(),
   detectors: Detector[] = createDefaultDetectors(),
 ): FileResult {
   const nodes: GraphNode[] = []
@@ -45,6 +46,7 @@ export function parseFile(
     ast,
     filePath,
     externalComponents,
+    globalStores,
     addNode(node) {
       if (nodeIdSet.has(node.id)) return
       nodeIdSet.add(node.id)
