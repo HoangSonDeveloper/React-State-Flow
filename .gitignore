@@ -6,3 +6,5 @@ dist/
 .env.local
 .claude/
 .idea
+
+CLAUDE.md
