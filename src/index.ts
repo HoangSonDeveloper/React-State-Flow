@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createServer } from 'http'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { resolve, join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import express from 'express'
@@ -33,9 +33,35 @@ function appendHistory(event: StoredRenderEvent) {
   if (renderHistory.length > MAX_HISTORY) renderHistory.shift()
 }
 
+/** Supported editor URL schemes for click-to-open. */
+const EDITOR_SCHEMES: Record<string, string> = {
+  vscode:    'vscode://file/{path}:{line}',
+  cursor:    'cursor://file/{path}:{line}',
+  webstorm:  'webstorm://open?file={path}&line={line}',
+  zed:       'zed://file/{path}:{line}',
+}
+
+function parseArgs(argv: string[]) {
+  const positional: string[] = []
+  let editor = 'vscode'
+
+  for (const arg of argv) {
+    if (arg.startsWith('--editor=')) {
+      editor = arg.slice('--editor='.length)
+    } else if (!arg.startsWith('--')) {
+      positional.push(arg)
+    }
+  }
+
+  return { targetPath: positional[0] ?? '.', editor }
+}
+
 async function main() {
-  const args = process.argv.slice(2)
-  const targetDir = resolve(args[0] ?? '.')
+  const { targetPath, editor } = parseArgs(process.argv.slice(2))
+  const targetDir = resolve(targetPath)
+  const editorScheme = EDITOR_SCHEMES[editor] ?? EDITOR_SCHEMES.vscode
+  // Sanitize for injection into <script> tag (alphanumeric + colon/slash/braces only)
+  const safeEditorScheme = editorScheme.replace(/[^a-zA-Z0-9:/{}._\-=&?]/g, '')
 
   if (!existsSync(targetDir)) {
     console.error(pc.red(`Directory not found: ${targetDir}`))
@@ -46,7 +72,7 @@ async function main() {
   console.log(`  ${pc.dim('Scanning')} ${pc.white(targetDir)}`)
 
   // C3: Wrap initial parse in try-catch so server still starts on parse errors
-  let graph: GraphData = { nodes: [], edges: [] }
+  let graph: GraphData = { projectRoot: targetDir, nodes: [], edges: [] }
   try {
     graph = parseProject(targetDir)
     console.log(
@@ -69,16 +95,22 @@ async function main() {
   // C4: Validate port as integer before embedding in HTML to prevent XSS
   const safeDevPort = parseInt(String(UI_DEV_PORT), 10)
 
+  // Config script injected into every HTML response
+  const configScript = `<script>window.__RSF_EDITOR_SCHEME__=${JSON.stringify(safeEditorScheme)}</script>`
+
   // Serve UI static files if built, else proxy hint
   if (existsSync(UI_DIST)) {
     app.use(express.static(UI_DIST))
     app.get('*', (_req, res) => {
-      res.sendFile(join(UI_DIST, 'index.html'))
+      // Inject config before </head>
+      const indexPath = join(UI_DIST, 'index.html')
+      const html = readFileSync(indexPath, 'utf-8').replace('</head>', `${configScript}</head>`)
+      res.type('html').send(html)
     })
   } else {
     app.get('/', (_req, res) => {
       res.send(`
-        <html><body style="font-family:monospace;background:#0f1117;color:#e2e8f0;padding:32px">
+        <html><head>${configScript}</head><body style="font-family:monospace;background:#0f1117;color:#e2e8f0;padding:32px">
           <p>UI not built yet. Run:</p>
           <pre style="color:#22c55e">npm run build:ui</pre>
           <p>Then open <a style="color:#818cf8" href="http://localhost:${safeDevPort}">http://localhost:${safeDevPort}</a></p>
