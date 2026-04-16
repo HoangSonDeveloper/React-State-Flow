@@ -8,11 +8,13 @@ const RSF_PORT = (window as any).__RSF_PORT__ ?? 7272
 
 export function useRuntimeBridge(
   onUpdate: (state: RuntimeState) => void,
-  onGraphUpdate?: (graph: GraphData) => void,  // D2: callback for file-watch graph updates
+  onGraphUpdate?: (graph: GraphData) => void,
 ) {
   const stateRef = useRef<RuntimeState>({
     renderCounts: {},
     recentlyRendered: new Set(),
+    wastedCounts: {},
+    recentlyWasted: new Set(),
   })
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
@@ -23,6 +25,14 @@ export function useRuntimeBridge(
       // Update render count
       s.renderCounts[event.componentName] = event.renderCount
 
+      // Track wasted renders
+      if (event.isWasted) {
+        s.wastedCounts[event.componentName] = (s.wastedCounts[event.componentName] ?? 0) + 1
+        s.recentlyWasted.add(event.componentName)
+      } else {
+        s.recentlyWasted.delete(event.componentName)
+      }
+
       // Mark as recently rendered
       s.recentlyRendered.add(event.componentName)
 
@@ -31,11 +41,20 @@ export function useRuntimeBridge(
       if (existing) clearTimeout(existing)
       const timer = setTimeout(() => {
         stateRef.current.recentlyRendered.delete(event.componentName)
-        onUpdate({ ...stateRef.current, recentlyRendered: new Set(stateRef.current.recentlyRendered) })
+        stateRef.current.recentlyWasted.delete(event.componentName)
+        onUpdate({
+          ...stateRef.current,
+          recentlyRendered: new Set(stateRef.current.recentlyRendered),
+          recentlyWasted: new Set(stateRef.current.recentlyWasted),
+        })
       }, FLASH_DURATION)
       timersRef.current.set(event.componentName, timer)
 
-      onUpdate({ ...s, recentlyRendered: new Set(s.recentlyRendered) })
+      onUpdate({
+        ...s,
+        recentlyRendered: new Set(s.recentlyRendered),
+        recentlyWasted: new Set(s.recentlyWasted),
+      })
     },
     [onUpdate],
   )
@@ -72,7 +91,7 @@ export function useRuntimeBridge(
               if (evt.type === 'render') handleHistoricalEvent(evt)
             }
             // Emit one update with all replayed counts, no flash
-            onUpdate({ ...stateRef.current, recentlyRendered: new Set() })
+            onUpdate({ ...stateRef.current, recentlyRendered: new Set(), recentlyWasted: new Set() })
           }
         } catch {}
       })

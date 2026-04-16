@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import {
   ReactFlow,
   Background,
@@ -6,10 +6,8 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
-  addEdge,
   type Node,
   type Edge,
-  type Connection,
   MarkerType,
   ReactFlowProvider,
 } from '@xyflow/react'
@@ -19,6 +17,7 @@ import { ContextNode } from './nodes/ContextNode.js'
 import type { GraphData, RuntimeState } from './types.js'
 import { useRuntimeBridge } from './useRuntimeBridge.js'
 import { applyDagreLayout } from './layout.js'
+import { SearchBar } from './SearchBar.js'
 
 const nodeTypes = {
   component: ComponentNode,
@@ -33,10 +32,13 @@ function buildFlowNodes(graph: GraphData, runtime: RuntimeState): Node[] {
     data: {
       label: n.label,
       file: n.file,
+      line: n.line,
       stateSlots: n.stateSlots,
       isContextProvider: n.isContextProvider,
       renderCount: runtime.renderCounts[n.id] ?? 0,
       isRecentlyRendered: runtime.recentlyRendered.has(n.id),
+      wastedCount: runtime.wastedCounts[n.id] ?? 0,
+      isRecentlyWasted: runtime.recentlyWasted.has(n.id),
     },
   }))
 }
@@ -64,9 +66,14 @@ function buildFlowEdges(graph: GraphData): Edge[] {
 function FlowCanvas() {
   const [graph, setGraph] = useState<GraphData | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showContexts, setShowContexts] = useState(true)
+  const [showStores, setShowStores] = useState(true)
   const [runtime, setRuntime] = useState<RuntimeState>({
     renderCounts: {},
     recentlyRendered: new Set(),
+    wastedCounts: {},
+    recentlyWasted: new Set(),
   })
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
@@ -75,9 +82,21 @@ function FlowCanvas() {
   // D5: Capture ReactFlow instance for imperative fitView
   const rfInstanceRef = useRef<any>(null)
 
-  const onConnect = useCallback(
-    (connection: Connection) => setEdges((eds) => addEdge(connection, eds)),
-    [setEdges],
+  const handleNodeClick = useCallback(
+    (_: MouseEvent, node: Node) => {
+      if (!graph) return
+      const gNode = graph.nodes.find((n) => n.id === node.id)
+      if (!gNode) return
+
+      const scheme: string = (window as any).__RSF_EDITOR_SCHEME__ ?? 'vscode://file/{path}:{line}'
+      const absPath = `${graph.projectRoot}/${gNode.file}`
+      const url = scheme
+        .replace('{path}', encodeURIComponent(absPath).replace(/%2F/g, '/'))
+        .replace('{line}', String(gNode.line ?? 1))
+
+      window.open(url, '_self')
+    },
+    [graph],
   )
 
   // D4: Load static graph with retry backoff
@@ -109,12 +128,34 @@ function FlowCanvas() {
     return () => { cancelled = true }
   }, [])
 
-  // D1 Effect 1: Rebuild layout only when the static graph changes
+  // Derived: apply search/filter before layout
+  const filteredGraph = useMemo(() => {
+    if (!graph) return null
+    return {
+      ...graph,
+      nodes: graph.nodes.filter((n) => {
+        if (n.type === 'context' && !showContexts) return false
+        if (n.type === 'store' && !showStores) return false
+        if (searchQuery) return n.label.toLowerCase().includes(searchQuery.toLowerCase())
+        return true
+      }),
+    }
+  }, [graph, searchQuery, showContexts, showStores])
+
+  // D1 Effect 1: Rebuild layout when graph topology or filter changes
   useEffect(() => {
-    if (!graph) return
-    const emptyRuntime: RuntimeState = { renderCounts: {}, recentlyRendered: new Set() }
-    const rawNodes = buildFlowNodes(graph, emptyRuntime)
-    const rawEdges = buildFlowEdges(graph)
+    if (!filteredGraph) return
+    const emptyRuntime: RuntimeState = {
+      renderCounts: {},
+      recentlyRendered: new Set(),
+      wastedCounts: {},
+      recentlyWasted: new Set(),
+    }
+    const rawNodes = buildFlowNodes(filteredGraph, emptyRuntime)
+    // Prune edges referencing nodes not in filtered set
+    const nodeIds = new Set(filteredGraph.nodes.map((n) => n.id))
+    const prunedGraph = { ...filteredGraph, edges: filteredGraph.edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target)) }
+    const rawEdges = buildFlowEdges(prunedGraph)
     const laidOut = applyDagreLayout(rawNodes, rawEdges)
     setNodes(laidOut)
     setEdges(rawEdges)
@@ -122,11 +163,11 @@ function FlowCanvas() {
     requestAnimationFrame(() => {
       rfInstanceRef.current?.fitView({ padding: 0.15, duration: 400 })
     })
-  }, [graph, setNodes, setEdges])
+  }, [filteredGraph, setNodes, setEdges])
 
   // D1 Effect 2: Update render counts/highlights without recomputing layout
   useEffect(() => {
-    if (!graph) return
+    if (!filteredGraph) return
     setNodes((prev) =>
       prev.map((n) => ({
         ...n,
@@ -134,10 +175,12 @@ function FlowCanvas() {
           ...n.data,
           renderCount: runtime.renderCounts[n.id] ?? 0,
           isRecentlyRendered: runtime.recentlyRendered.has(n.id),
+          wastedCount: runtime.wastedCounts[n.id] ?? 0,
+          isRecentlyWasted: runtime.recentlyWasted.has(n.id),
         },
       })),
     )
-  }, [runtime, graph, setNodes])
+  }, [runtime, filteredGraph, setNodes])
 
   // Runtime bridge
   const handleRuntimeUpdate = useCallback((state: RuntimeState) => {
@@ -163,7 +206,7 @@ function FlowCanvas() {
     )
   }
 
-  if (!graph) {
+  if (!graph || !filteredGraph) {
     return (
       <div style={{ color: '#64748b', fontFamily: 'monospace', padding: 32, background: '#0f1117', height: '100%' }}>
         Loading graph...
@@ -190,8 +233,16 @@ function FlowCanvas() {
         <span style={{ color: '#e2e8f0', fontWeight: 700, fontSize: 14 }}>React State Flow</span>
         <span style={{ color: '#334155', fontSize: 12 }}>|</span>
         <span style={{ color: '#64748b', fontSize: 12 }}>
-          {graph.nodes.length} nodes · {graph.edges.length} edges
+          {filteredGraph?.nodes.length ?? 0} / {graph.nodes.length} nodes · {graph.edges.length} edges
         </span>
+        <SearchBar
+          value={searchQuery}
+          onChange={setSearchQuery}
+          showContexts={showContexts}
+          onToggleContexts={() => setShowContexts((v) => !v)}
+          showStores={showStores}
+          onToggleStores={() => setShowStores((v) => !v)}
+        />
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 12, alignItems: 'center', fontSize: 11, color: '#64748b' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ width: 8, height: 8, borderRadius: 999, background: '#334155', display: 'inline-block' }} />
@@ -209,6 +260,10 @@ function FlowCanvas() {
             <span style={{ width: 8, height: 8, borderRadius: 999, background: '#22c55e', display: 'inline-block' }} />
             re-render
           </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 999, background: '#f97316', display: 'inline-block' }} />
+            wasted render
+          </span>
         </div>
       </div>
 
@@ -218,9 +273,11 @@ function FlowCanvas() {
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
         nodeTypes={nodeTypes}
+        onNodeClick={handleNodeClick}
         onInit={(instance) => { rfInstanceRef.current = instance }}
+        nodesConnectable={false}
+        edgesUpdatable={false}
         fitView
         fitViewOptions={{ padding: 0.15, minZoom: 0.2 }}
         style={{ background: '#0f1117', width: '100%', height: '100%' }}

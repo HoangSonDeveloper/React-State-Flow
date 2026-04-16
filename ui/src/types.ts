@@ -1,5 +1,5 @@
-export type NodeType = 'component' | 'context'
-export type EdgeType = 'parent-child' | 'context-subscription' | 'context-provision'
+export type NodeType = 'component' | 'context' | 'store'
+export type EdgeType = 'parent-child' | 'context-subscription' | 'context-provision' | 'store-subscription'
 
 export interface GraphNode {
   id: string
@@ -10,6 +10,7 @@ export interface GraphNode {
   stateSlots: string[]
   isContextProvider: boolean
   contextName?: string
+  storeLibrary?: 'redux' | 'zustand'
 }
 
 export interface GraphEdge {
@@ -20,6 +21,7 @@ export interface GraphEdge {
 }
 
 export interface GraphData {
+  projectRoot: string
   nodes: GraphNode[]
   edges: GraphEdge[]
 }
@@ -29,10 +31,13 @@ export interface RenderEvent {
   componentName: string
   renderCount: number
   timestamp: number
+  isWasted?: boolean
 }
 
 // Runtime state overlaid on top of static graph
 export interface RuntimeState {
   renderCounts: Record<string, number>
-  recentlyRendered: Set<string> // cleared after 800ms
+  recentlyRendered: Set<string>    // cleared after 800ms
+  wastedCounts: Record<string, number>
+  recentlyWasted: Set<string>      // cleared after 800ms
 }

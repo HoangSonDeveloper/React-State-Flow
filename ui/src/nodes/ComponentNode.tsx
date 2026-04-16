@@ -4,27 +4,35 @@ interface Props {
   data: {
     label: string
     file: string
+    line?: number
     stateSlots: string[]
     isContextProvider: boolean
     renderCount: number
     isRecentlyRendered: boolean
+    wastedCount: number
+    isRecentlyWasted: boolean
   }
 }
 
 export function ComponentNode({ data }: Props) {
-  const { label, file, stateSlots, isContextProvider, renderCount, isRecentlyRendered } = data
+  const { label, file, stateSlots, isContextProvider, renderCount, isRecentlyRendered, wastedCount, isRecentlyWasted } = data
+
+  const flashColor = isRecentlyWasted ? '#f97316' : isRecentlyRendered ? '#22c55e' : null
+  const borderColor = flashColor ?? (isContextProvider ? '#818cf8' : '#2e3348')
+  const bgColor = isRecentlyWasted ? '#2d1a0a' : isRecentlyRendered ? '#1e3a2f' : '#1a1d27'
+  const glowColor = isRecentlyWasted ? '#f9731644' : isRecentlyRendered ? '#22c55e44' : null
 
   return (
     <div
       style={{
-        background: isRecentlyRendered ? '#1e3a2f' : '#1a1d27',
-        border: `1.5px solid ${isRecentlyRendered ? '#22c55e' : isContextProvider ? '#818cf8' : '#2e3348'}`,
+        background: bgColor,
+        border: `1.5px solid ${borderColor}`,
         borderRadius: 10,
         padding: '10px 14px',
         minWidth: 160,
         fontFamily: 'monospace',
         transition: 'border-color 0.2s, background 0.2s',
-        boxShadow: isRecentlyRendered ? '0 0 12px #22c55e44' : '0 2px 8px #00000044',
+        boxShadow: glowColor ? `0 0 12px ${glowColor}` : '0 2px 8px #00000044',
       }}
     >
       <Handle type="target" position={Position.Top} style={{ background: '#4b5563' }} />
@@ -72,8 +80,8 @@ export function ComponentNode({ data }: Props) {
             position: 'absolute',
             top: -8,
             right: -8,
-            background: isRecentlyRendered ? '#22c55e' : '#334155',
-            color: isRecentlyRendered ? '#fff' : '#94a3b8',
+            background: isRecentlyWasted ? '#f97316' : isRecentlyRendered ? '#22c55e' : '#334155',
+            color: isRecentlyWasted || isRecentlyRendered ? '#fff' : '#94a3b8',
             fontSize: 10,
             fontWeight: 700,
             borderRadius: 999,
@@ -84,6 +92,28 @@ export function ComponentNode({ data }: Props) {
           }}
         >
           {renderCount}
+        </div>
+      )}
+
+      {/* Wasted render badge */}
+      {wastedCount > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            top: -8,
+            left: -8,
+            background: '#f97316',
+            color: '#fff',
+            fontSize: 9,
+            fontWeight: 700,
+            borderRadius: 999,
+            padding: '1px 5px',
+            minWidth: 18,
+            textAlign: 'center',
+            title: 'Wasted renders',
+          }}
+        >
+          ⚠ {wastedCount}
         </div>
       )}
 

@@ -21,7 +21,4 @@ export interface GraphEdge {
   type: EdgeType
 }
 
-export interface GraphData {
-  nodes: GraphNode[]
-  edges: GraphEdge[]
-}
+// GraphData is defined in index.ts (includes projectRoot)

@@ -13,6 +13,7 @@ export interface RenderEvent {
   componentName: string
   renderCount: number
   timestamp: number
+  isWasted?: boolean  // true khi props/state không đổi nhưng vẫn re-render
 }
 
 declare global {
@@ -112,19 +113,48 @@ function getFiberName(fiber: any): string | null {
   return null
 }
 
-// B1: seenInCommit prevents counting sibling instances multiple times per commit
-function walkFiber(fiber: any, seenInCommit: Set<string>) {
-  if (!fiber) return
-
-  const name = getFiberName(fiber)
-  if (name && /^[A-Z]/.test(name) && !seenInCommit.has(name)) {
-    seenInCommit.add(name)
-    const count = incrementRenderCount(name)
-    send({ type: 'render', componentName: name, renderCount: count, timestamp: Date.now() })
+/** Shallow-equal two plain objects (props). Returns true if identical. */
+function shallowEqual(a: any, b: any): boolean {
+  if (a === b) return true
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false
+  const keysA = Object.keys(a)
+  const keysB = Object.keys(b)
+  if (keysA.length !== keysB.length) return false
+  for (const k of keysA) {
+    if (a[k] !== b[k]) return false
   }
+  return true
+}
 
-  walkFiber(fiber.child, seenInCommit)
-  walkFiber(fiber.sibling, seenInCommit)
+/** Detect if a fiber's re-render was unnecessary (props+state unchanged). */
+function isWastedRender(fiber: any): boolean {
+  const prev = fiber.alternate
+  if (!prev) return false  // first mount, not a wasted render
+  const propsEqual = shallowEqual(fiber.memoizedProps, prev.memoizedProps)
+  // For state: compare linked-list reference (function components use hook linked list)
+  const stateEqual = fiber.memoizedState === prev.memoizedState
+  return propsEqual && stateEqual
+}
+
+// B1: seenInCommit prevents counting sibling instances multiple times per commit
+// Iterative walk to avoid stack overflow on deep trees (e.g. react-virtual)
+function walkFiber(rootFiber: any, seenInCommit: Set<string>) {
+  const stack: any[] = [rootFiber]
+  while (stack.length > 0) {
+    const fiber = stack.pop()
+    if (!fiber) continue
+
+    const name = getFiberName(fiber)
+    if (name && /^[A-Z]/.test(name) && !seenInCommit.has(name)) {
+      seenInCommit.add(name)
+      const count = incrementRenderCount(name)
+      const isWasted = isWastedRender(fiber)
+      send({ type: 'render', componentName: name, renderCount: count, timestamp: Date.now(), isWasted })
+    }
+
+    if (fiber.sibling) stack.push(fiber.sibling)
+    if (fiber.child) stack.push(fiber.child)
+  }
 }
 
 // Bootstrap — only in development

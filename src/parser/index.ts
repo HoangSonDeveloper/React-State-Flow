@@ -1,9 +1,15 @@
 import { readFileSync, readdirSync, statSync } from 'fs'
 import { join, relative } from 'path'
 import { parseFile } from './parse-file.js'
-import type { GraphData, GraphNode, GraphEdge } from './types.js'
+import type { GraphNode, GraphEdge } from './types.js'
 
-export type { GraphData, GraphNode, GraphEdge } from './types.js'
+export type { GraphNode, GraphEdge } from './types.js'
+
+export interface GraphData {
+  projectRoot: string
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+}
 
 const EXTENSIONS = ['.tsx', '.jsx', '.ts', '.js']
 
@@ -76,5 +82,5 @@ export function parseProject(projectRoot: string): GraphData {
     return true
   })
 
-  return { nodes: uniqueNodes, edges: uniqueEdges }
+  return { projectRoot, nodes: uniqueNodes, edges: uniqueEdges }
 }
