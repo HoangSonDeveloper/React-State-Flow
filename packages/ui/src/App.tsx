@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
@@ -6,7 +6,6 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
-  useReactFlow,
   addEdge,
   type Node,
   type Edge,
@@ -43,18 +42,23 @@ function buildFlowNodes(graph: GraphData, runtime: RuntimeState): Node[] {
 }
 
 function buildFlowEdges(graph: GraphData): Edge[] {
-  return graph.edges.map((e) => ({
-    id: e.id,
-    source: e.source,
-    target: e.target,
-    type: 'smoothstep',
-    animated: e.type === 'context-subscription',
-    style: {
-      stroke: e.type === 'context-subscription' ? '#818cf8' : '#334155',
-      strokeWidth: e.type === 'context-subscription' ? 2 : 1.5,
-    },
-    markerEnd: { type: MarkerType.ArrowClosed, color: e.type === 'context-subscription' ? '#818cf8' : '#334155' },
-  }))
+  return graph.edges.map((e) => {
+    const isCtxSub = e.type === 'context-subscription'
+    const isCtxProv = e.type === 'context-provision'
+    const color = isCtxSub ? '#818cf8' : isCtxProv ? '#a78bfa' : '#334155'
+    return {
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      type: 'smoothstep',
+      animated: isCtxSub || isCtxProv,
+      style: {
+        stroke: color,
+        strokeWidth: isCtxSub || isCtxProv ? 2 : 1.5,
+      },
+      markerEnd: { type: MarkerType.ArrowClosed, color },
+    }
+  })
 }
 
 function FlowCanvas() {
@@ -67,41 +71,85 @@ function FlowCanvas() {
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
-  const { fitView } = useReactFlow()
+
+  // D5: Capture ReactFlow instance for imperative fitView
+  const rfInstanceRef = useRef<any>(null)
 
   const onConnect = useCallback(
     (connection: Connection) => setEdges((eds) => addEdge(connection, eds)),
     [setEdges],
   )
 
-  // Load static graph
+  // D4: Load static graph with retry backoff
   useEffect(() => {
-    fetch('/api/graph')
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json()
-      })
-      .then((data: GraphData) => setGraph(data))
-      .catch((e) => setError(e.message))
+    let cancelled = false
+    let delay = 500
+
+    function attempt(tries: number) {
+      fetch('/api/graph')
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`)
+          return r.json()
+        })
+        .then((data: GraphData) => {
+          if (!cancelled) setGraph(data)
+        })
+        .catch(() => {
+          if (cancelled) return
+          if (tries >= 6) {
+            setError('Could not reach CLI server after multiple retries')
+            return
+          }
+          setTimeout(() => attempt(tries + 1), delay)
+          delay = Math.min(delay * 2, 8000)
+        })
+    }
+
+    attempt(0)
+    return () => { cancelled = true }
   }, [])
 
-  // Rebuild nodes when graph or runtime changes
+  // D1 Effect 1: Rebuild layout only when the static graph changes
   useEffect(() => {
     if (!graph) return
-    const rawNodes = buildFlowNodes(graph, runtime)
+    const emptyRuntime: RuntimeState = { renderCounts: {}, recentlyRendered: new Set() }
+    const rawNodes = buildFlowNodes(graph, emptyRuntime)
     const rawEdges = buildFlowEdges(graph)
     const laidOut = applyDagreLayout(rawNodes, rawEdges)
     setNodes(laidOut)
     setEdges(rawEdges)
-    // Re-fit after layout is applied
-    setTimeout(() => fitView({ padding: 0.15, duration: 400 }), 50)
-  }, [graph, runtime, setNodes, setEdges, fitView])
+    // D5: fitView after layout using requestAnimationFrame to ensure DOM is ready
+    requestAnimationFrame(() => {
+      rfInstanceRef.current?.fitView({ padding: 0.15, duration: 400 })
+    })
+  }, [graph, setNodes, setEdges])
+
+  // D1 Effect 2: Update render counts/highlights without recomputing layout
+  useEffect(() => {
+    if (!graph) return
+    setNodes((prev) =>
+      prev.map((n) => ({
+        ...n,
+        data: {
+          ...n.data,
+          renderCount: runtime.renderCounts[n.id] ?? 0,
+          isRecentlyRendered: runtime.recentlyRendered.has(n.id),
+        },
+      })),
+    )
+  }, [runtime, graph, setNodes])
 
   // Runtime bridge
   const handleRuntimeUpdate = useCallback((state: RuntimeState) => {
     setRuntime(state)
   }, [])
-  useRuntimeBridge(handleRuntimeUpdate)
+
+  // D2: graph-update from file watcher
+  const handleGraphUpdate = useCallback((newGraph: GraphData) => {
+    setGraph(newGraph)
+  }, [])
+
+  useRuntimeBridge(handleRuntimeUpdate, handleGraphUpdate)
 
   if (error) {
     return (
@@ -151,7 +199,11 @@ function FlowCanvas() {
           </span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ width: 8, height: 8, borderRadius: 999, background: '#818cf8', display: 'inline-block' }} />
-            context
+            context sub
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 999, background: '#a78bfa', display: 'inline-block' }} />
+            context provides
           </span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ width: 8, height: 8, borderRadius: 999, background: '#22c55e', display: 'inline-block' }} />
@@ -168,6 +220,7 @@ function FlowCanvas() {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         nodeTypes={nodeTypes}
+        onInit={(instance) => { rfInstanceRef.current = instance }}
         fitView
         fitViewOptions={{ padding: 0.15, minZoom: 0.2 }}
         style={{ background: '#0f1117', width: '100%', height: '100%' }}
