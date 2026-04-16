@@ -8,6 +8,8 @@
  *   import 'react-state-flow/runtime'   // top of main.tsx / index.tsx
  */
 
+import { isWastedRender } from './wasted.js'
+
 export interface RenderEvent {
   type: 'render'
   componentName: string
@@ -111,29 +113,6 @@ function getFiberName(fiber: any): string | null {
     )
   }
   return null
-}
-
-/** Shallow-equal two plain objects (props). Returns true if identical. */
-function shallowEqual(a: any, b: any): boolean {
-  if (a === b) return true
-  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false
-  const keysA = Object.keys(a)
-  const keysB = Object.keys(b)
-  if (keysA.length !== keysB.length) return false
-  for (const k of keysA) {
-    if (a[k] !== b[k]) return false
-  }
-  return true
-}
-
-/** Detect if a fiber's re-render was unnecessary (props+state unchanged). */
-function isWastedRender(fiber: any): boolean {
-  const prev = fiber.alternate
-  if (!prev) return false  // first mount, not a wasted render
-  const propsEqual = shallowEqual(fiber.memoizedProps, prev.memoizedProps)
-  // For state: compare linked-list reference (function components use hook linked list)
-  const stateEqual = fiber.memoizedState === prev.memoizedState
-  return propsEqual && stateEqual
 }
 
 // B1: seenInCommit prevents counting sibling instances multiple times per commit
