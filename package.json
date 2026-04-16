@@ -1,15 +1,37 @@
 {
   "name": "react-state-flow",
-  "private": true,
-  "version": "0.0.1",
-  "packageManager": "pnpm@9.0.0",
-  "workspaces": [
-    "packages/*",
-    "apps/*"
+  "version": "0.0.4",
+  "description": "Visualize React component hierarchy, state flow, and real-time render events",
+  "bin": {
+    "react-state-flow": "./dist/index.js"
+  },
+  "files": [
+    "dist"
   ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
-    "build": "pnpm -r build",
-    "dev": "pnpm --filter @rsf/ui dev",
-    "cli": "pnpm --filter @rsf/cli start"
+    "start": "tsx src/index.ts",
+    "build": "npm run build --prefix ui && node build.mjs",
+    "ui:dev": "npm run dev --prefix ui"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "express": "^4.19.0",
+    "ws": "^8.17.0",
+    "open": "^10.1.0",
+    "picocolors": "^1.0.1"
+  },
+  "devDependencies": {
+    "@babel/parser": "^7.24.0",
+    "@babel/traverse": "^7.24.0",
+    "@babel/types": "^7.24.0",
+    "@types/babel__traverse": "^7.20.6",
+    "@types/express": "^4.17.21",
+    "@types/ws": "^8.5.10",
+    "esbuild": "^0.21.0",
+    "tsx": "^4.15.0",
+    "typescript": "^5.4.0"
   }
 }

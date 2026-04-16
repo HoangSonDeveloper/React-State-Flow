@@ -70,7 +70,6 @@ export function parseFile(
       plugins: ['jsx', 'typescript', 'decorators-legacy'],
     })
   } catch (err: unknown) {
-    // A7: Log parse errors instead of silently swallowing them
     const msg = err instanceof Error ? err.message : String(err)
     console.warn(`[RSF] Failed to parse ${filePath}: ${msg}`)
     return { nodes, edges }

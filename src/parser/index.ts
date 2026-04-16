@@ -27,7 +27,7 @@ function collectFiles(dir: string): string[] {
 export function parseProject(projectRoot: string): GraphData {
   const files = collectFiles(projectRoot)
 
-  // A1 Pass 1: collect all component node ids for cross-file edge resolution
+  // Pass 1: collect all component node ids for cross-file edge resolution
   const globalComponentSet = new Set<string>()
   for (const file of files) {
     const code = readFileSync(file, 'utf-8')
@@ -38,7 +38,7 @@ export function parseProject(projectRoot: string): GraphData {
     }
   }
 
-  // A1 Pass 2: full parse with global component set for cross-file edges
+  // Pass 2: full parse with global component set for cross-file edges
   const allNodes: GraphNode[] = []
   const allEdges: GraphEdge[] = []
   for (const file of files) {
