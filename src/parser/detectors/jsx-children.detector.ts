@@ -1,6 +1,7 @@
 import _traverse from '@babel/traverse'
 import * as t from '@babel/types'
 import type { Detector, ParseContext } from './types.js'
+import { isReactComponentSuper } from './discover-components.js'
 
 const traverse = (_traverse as any).default ?? _traverse
 
@@ -34,6 +35,10 @@ export class JSXChildrenDetector implements Detector {
         if (isFn || isWrapped) {
           this.extractChildren(path, ctx, known, name)
         }
+      },
+      ClassDeclaration: (path: any) => {
+        if (!isReactComponentSuper(path.node.superClass)) return
+        this.extractChildren(path, ctx, known)
       },
     })
   }

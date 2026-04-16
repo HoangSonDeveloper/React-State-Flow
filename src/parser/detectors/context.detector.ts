@@ -57,6 +57,17 @@ export class ContextDetector implements Detector {
         const arg = innerPath.node.arguments[0]
         if (t.isIdentifier(arg)) contextUsages.push(arg.name)
       },
+      // Class component: `static contextType = ThemeContext`
+      ClassProperty(innerPath: any) {
+        const node = innerPath.node
+        if (
+          node.static &&
+          t.isIdentifier(node.key, { name: 'contextType' }) &&
+          t.isIdentifier(node.value)
+        ) {
+          contextUsages.push(node.value.name)
+        }
+      },
       JSXOpeningElement(innerPath: any) {
         const el = innerPath.node.name
         // <XxxContext.Provider>

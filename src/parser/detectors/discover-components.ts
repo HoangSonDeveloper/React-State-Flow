@@ -9,9 +9,30 @@ function isComponentName(name: string): boolean {
 }
 
 /**
- * Walks the AST and invokes `onComponent` for each React function component it finds.
+ * Returns true if `superClass` references React's Component or PureComponent
+ * (either bare or member-accessed via `React`).
+ */
+export function isReactComponentSuper(sup: t.Node | null | undefined): boolean {
+  if (!sup) return false
+  if (t.isIdentifier(sup) && (sup.name === 'Component' || sup.name === 'PureComponent')) {
+    return true
+  }
+  if (
+    t.isMemberExpression(sup) &&
+    t.isIdentifier(sup.object, { name: 'React' }) &&
+    t.isIdentifier(sup.property) &&
+    (sup.property.name === 'Component' || sup.property.name === 'PureComponent')
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
+ * Walks the AST and invokes `onComponent` for each React component it finds.
  * Handles: function declarations, arrow/function expressions, HOC/memo/forwardRef wrapping,
- * and anonymous default exports (name derived from file path).
+ * anonymous default exports (name derived from file path), and class components
+ * extending React.Component / React.PureComponent.
  */
 export function discoverComponents(
   ast: t.File,
@@ -24,6 +45,13 @@ export function discoverComponents(
       if (name && isComponentName(name)) {
         onComponent({ name, path, line: path.node.loc?.start.line ?? 0 })
       }
+    },
+
+    ClassDeclaration(path: any) {
+      const name = path.node.id?.name
+      if (!name || !isComponentName(name)) return
+      if (!isReactComponentSuper(path.node.superClass)) return
+      onComponent({ name, path, line: path.node.loc?.start.line ?? 0 })
     },
 
     VariableDeclarator(path: any) {
