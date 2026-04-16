@@ -74,10 +74,10 @@ react-state-flow [directory] [options]
 | `directory` | `.` | Path to your React source directory |
 | `--port=<n>` | `7272` | Port for the CLI server |
 | `--no-open` | — | Skip auto-opening the browser |
-| `--ignore=<glob>` | — | Extra paths to ignore (comma-separated) |
+| `--ignore=<names>` | — | Extra directory names to skip, comma-separated (e.g. `tests,fixtures`) |
 | `--editor=<name>` | `vscode` | Editor for click-to-open: `vscode`, `cursor`, `webstorm`, `zed` |
 
-The CLI runs on port `7272`. Your app's Vite dev server can run on any other port.
+The CLI defaults to port `7272`; override with `--port`. Your app's Vite dev server can run on any other port.
 
 ## What the graph shows
 
