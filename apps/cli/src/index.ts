@@ -1,19 +1,37 @@
 #!/usr/bin/env node
 import { createServer } from 'http'
-import { readFileSync, existsSync } from 'fs'
+import { existsSync } from 'fs'
 import { resolve, join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import express from 'express'
 import { WebSocketServer } from 'ws'
 import open from 'open'
 import pc from 'picocolors'
+import chokidar from 'chokidar'
 import { parseProject } from '@rsf/parser'
+import type { GraphData } from '@rsf/parser'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const PORT = 7272
 const UI_DIST = resolve(__dirname, '../../packages/ui/dist')
 const UI_DEV_PORT = 7273
+
+// C2: Render event history ring buffer — replayed to new UI connections
+interface StoredRenderEvent {
+  type: 'render'
+  componentName: string
+  renderCount: number
+  timestamp: number
+}
+
+const MAX_HISTORY = 1000
+const renderHistory: StoredRenderEvent[] = []
+
+function appendHistory(event: StoredRenderEvent) {
+  renderHistory.push(event)
+  if (renderHistory.length > MAX_HISTORY) renderHistory.shift()
+}
 
 async function main() {
   const args = process.argv.slice(2)
@@ -27,19 +45,29 @@ async function main() {
   console.log(pc.cyan('\n  React State Flow\n'))
   console.log(`  ${pc.dim('Scanning')} ${pc.white(targetDir)}`)
 
-  // --- Parse project ---
-  const graph = parseProject(targetDir)
-  console.log(
-    `  ${pc.green('✓')} Found ${pc.white(graph.nodes.length)} nodes, ${pc.white(graph.edges.length)} edges`,
-  )
+  // C3: Wrap initial parse in try-catch so server still starts on parse errors
+  let graph: GraphData = { nodes: [], edges: [] }
+  try {
+    graph = parseProject(targetDir)
+    console.log(
+      `  ${pc.green('✓')} Found ${pc.white(graph.nodes.length)} nodes, ${pc.white(graph.edges.length)} edges`,
+    )
+  } catch (err) {
+    console.error(pc.red(`  [RSF] Initial parse failed: ${(err as Error).message}`))
+    console.warn(pc.yellow('  Serving empty graph. Fix errors and save to trigger reload.'))
+  }
 
   // --- HTTP + WS server ---
   const app = express()
+  const uiClients = new Set<any>()
 
   // Serve graph data
   app.get('/api/graph', (_req, res) => {
     res.json(graph)
   })
+
+  // C4: Validate port as integer before embedding in HTML to prevent XSS
+  const safeDevPort = parseInt(String(UI_DEV_PORT), 10)
 
   // Serve UI static files if built, else proxy hint
   if (existsSync(UI_DIST)) {
@@ -53,7 +81,7 @@ async function main() {
         <html><body style="font-family:monospace;background:#0f1117;color:#e2e8f0;padding:32px">
           <p>UI not built yet. Run:</p>
           <pre style="color:#22c55e">cd packages/ui && pnpm dev</pre>
-          <p>Then open <a style="color:#818cf8" href="http://localhost:${UI_DEV_PORT}">http://localhost:${UI_DEV_PORT}</a></p>
+          <p>Then open <a style="color:#818cf8" href="http://localhost:${safeDevPort}">http://localhost:${safeDevPort}</a></p>
         </body></html>
       `)
     })
@@ -67,14 +95,16 @@ async function main() {
   //   /runtime-ui  ← pushes events to the UI browser
   const wss = new WebSocketServer({ server: httpServer })
 
-  const uiClients = new Set<any>()
-
   wss.on('connection', (ws, req) => {
     const path = req.url ?? ''
 
     if (path === '/runtime-ui') {
       // UI browser connecting
       uiClients.add(ws)
+      // C2: Replay render history so refreshed UI can reconstruct render counts
+      if (renderHistory.length > 0) {
+        ws.send(JSON.stringify({ type: 'history', events: renderHistory }))
+      }
       ws.on('close', () => uiClients.delete(ws))
       return
     }
@@ -82,9 +112,15 @@ async function main() {
     if (path === '/runtime') {
       // User app runtime connecting
       ws.on('message', (raw) => {
+        const str = raw.toString()
+        // C2: Store render events for history replay
+        try {
+          const evt = JSON.parse(str) as StoredRenderEvent
+          if (evt.type === 'render') appendHistory(evt)
+        } catch {}
         // Forward to all UI clients
         for (const client of uiClients) {
-          if (client.readyState === 1) client.send(raw.toString())
+          if (client.readyState === 1) client.send(str)
         }
       })
       return
@@ -100,6 +136,36 @@ async function main() {
     // Open browser
     open(url).catch(() => {})
   })
+
+  // C1: File watching — re-parse on source changes and push updated graph to UI
+  const WATCH_EXTENSIONS = ['.tsx', '.jsx', '.ts', '.js']
+  let reparsTimer: ReturnType<typeof setTimeout> | null = null
+
+  function scheduleReparse() {
+    if (reparsTimer) clearTimeout(reparsTimer)
+    reparsTimer = setTimeout(() => {
+      try {
+        graph = parseProject(targetDir)
+        console.log(pc.cyan(`  [RSF] Graph updated: ${graph.nodes.length} nodes, ${graph.edges.length} edges`))
+        const payload = JSON.stringify({ type: 'graph-update', graph })
+        for (const client of uiClients) {
+          if (client.readyState === 1) client.send(payload)
+        }
+      } catch (err) {
+        console.error(pc.red(`  [RSF] Re-parse failed: ${(err as Error).message}`))
+      }
+    }, 300)
+  }
+
+  chokidar
+    .watch(targetDir, {
+      ignored: /(node_modules|\.git|dist|build|\.next)/,
+      persistent: true,
+      ignoreInitial: true,
+    })
+    .on('change', (p) => { if (WATCH_EXTENSIONS.some((ext) => p.endsWith(ext))) scheduleReparse() })
+    .on('add',    (p) => { if (WATCH_EXTENSIONS.some((ext) => p.endsWith(ext))) scheduleReparse() })
+    .on('unlink', (p) => { if (WATCH_EXTENSIONS.some((ext) => p.endsWith(ext))) scheduleReparse() })
 }
 
 main().catch((e) => {

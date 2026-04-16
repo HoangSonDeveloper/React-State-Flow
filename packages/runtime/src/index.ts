@@ -25,25 +25,43 @@ declare global {
 const RSF_PORT = (window as any).__RSF_PORT__ ?? 7272
 const WS_URL = `ws://localhost:${RSF_PORT}/runtime`
 
-// Render counter per component
+// B2: Render counter per component with max-size cap to prevent memory leak
 const renderCounts = new Map<string, number>()
+const MAX_RENDER_COUNT_ENTRIES = 500
+
+function incrementRenderCount(name: string): number {
+  if (!renderCounts.has(name) && renderCounts.size >= MAX_RENDER_COUNT_ENTRIES) {
+    // Evict oldest entry (insertion order)
+    const firstKey = renderCounts.keys().next().value
+    if (firstKey !== undefined) renderCounts.delete(firstKey)
+  }
+  const count = (renderCounts.get(name) ?? 0) + 1
+  renderCounts.set(name, count)
+  return count
+}
 
 function send(event: RenderEvent) {
   if (!window.__RSF_WS__ || window.__RSF_WS__.readyState !== WebSocket.OPEN) return
   window.__RSF_WS__.send(JSON.stringify(event))
 }
 
+// B3: Exponential backoff reconnect
+let reconnectDelay = 2000
+
 function connect() {
   const ws = new WebSocket(WS_URL)
   window.__RSF_WS__ = ws
 
   ws.addEventListener('open', () => {
+    reconnectDelay = 2000  // reset on successful connection
+    renderCounts.clear()   // B2: sync counts with server on reconnect
     console.debug('[RSF] Runtime connected')
   })
 
   ws.addEventListener('close', () => {
-    console.debug('[RSF] Runtime disconnected, retrying in 2s...')
-    setTimeout(connect, 2000)
+    console.debug(`[RSF] Runtime disconnected, retrying in ${reconnectDelay / 1000}s...`)
+    setTimeout(connect, reconnectDelay)
+    reconnectDelay = Math.min(reconnectDelay * 2, 30_000)
   })
 
   ws.addEventListener('error', () => {
@@ -67,9 +85,9 @@ function hookIntoReact() {
       // Call through so React DevTools still works
       originalOnCommitFiberRoot(rendererID, root, priorityLevel)
 
-      // Walk the fiber tree from root
+      // B1: Pass per-commit Set to avoid counting sibling instances multiple times
       try {
-        walkFiber(root.current)
+        walkFiber(root.current, new Set<string>())
       } catch {
         // Never break the app
       }
@@ -94,18 +112,19 @@ function getFiberName(fiber: any): string | null {
   return null
 }
 
-function walkFiber(fiber: any) {
+// B1: seenInCommit prevents counting sibling instances multiple times per commit
+function walkFiber(fiber: any, seenInCommit: Set<string>) {
   if (!fiber) return
 
   const name = getFiberName(fiber)
-  if (name && /^[A-Z]/.test(name)) {
-    const count = (renderCounts.get(name) ?? 0) + 1
-    renderCounts.set(name, count)
+  if (name && /^[A-Z]/.test(name) && !seenInCommit.has(name)) {
+    seenInCommit.add(name)
+    const count = incrementRenderCount(name)
     send({ type: 'render', componentName: name, renderCount: count, timestamp: Date.now() })
   }
 
-  walkFiber(fiber.child)
-  walkFiber(fiber.sibling)
+  walkFiber(fiber.child, seenInCommit)
+  walkFiber(fiber.sibling, seenInCommit)
 }
 
 // Bootstrap

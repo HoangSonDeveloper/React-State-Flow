@@ -26,13 +26,25 @@ function collectFiles(dir: string): string[] {
 
 export function parseProject(projectRoot: string): GraphData {
   const files = collectFiles(projectRoot)
-  const allNodes: GraphNode[] = []
-  const allEdges: GraphEdge[] = []
 
+  // A1 Pass 1: collect all component node ids for cross-file edge resolution
+  const globalComponentSet = new Set<string>()
   for (const file of files) {
     const code = readFileSync(file, 'utf-8')
     const relPath = relative(projectRoot, file)
-    const { nodes, edges } = parseFile(code, relPath)
+    const { nodes } = parseFile(code, relPath)
+    for (const n of nodes) {
+      if (n.type === 'component') globalComponentSet.add(n.id)
+    }
+  }
+
+  // A1 Pass 2: full parse with global component set for cross-file edges
+  const allNodes: GraphNode[] = []
+  const allEdges: GraphEdge[] = []
+  for (const file of files) {
+    const code = readFileSync(file, 'utf-8')
+    const relPath = relative(projectRoot, file)
+    const { nodes, edges } = parseFile(code, relPath, globalComponentSet)
     allNodes.push(...nodes)
     allEdges.push(...edges)
   }

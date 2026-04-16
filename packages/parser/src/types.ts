@@ -11,7 +11,7 @@ export interface GraphNode {
   contextName?: string       // which context it provides/consumes
 }
 
-export type EdgeType = 'parent-child' | 'context-subscription'
+export type EdgeType = 'parent-child' | 'context-subscription' | 'context-provision'
 
 export interface GraphEdge {
   id: string

@@ -1,5 +1,5 @@
 export type NodeType = 'component' | 'context'
-export type EdgeType = 'parent-child' | 'context-subscription'
+export type EdgeType = 'parent-child' | 'context-subscription' | 'context-provision'
 
 export interface GraphNode {
   id: string

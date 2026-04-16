@@ -54,7 +54,12 @@ function getContextUsages(path: any): string[] {
   return names
 }
 
-export function parseFile(code: string, filePath: string): FileResult {
+// A1: Accept optional externalComponents for cross-file edge resolution
+export function parseFile(
+  code: string,
+  filePath: string,
+  externalComponents?: Set<string>,
+): FileResult {
   const nodes: GraphNode[] = []
   const edges: GraphEdge[] = []
 
@@ -64,7 +69,10 @@ export function parseFile(code: string, filePath: string): FileResult {
       sourceType: 'module',
       plugins: ['jsx', 'typescript', 'decorators-legacy'],
     })
-  } catch {
+  } catch (err: unknown) {
+    // A7: Log parse errors instead of silently swallowing them
+    const msg = err instanceof Error ? err.message : String(err)
+    console.warn(`[RSF] Failed to parse ${filePath}: ${msg}`)
     return { nodes, edges }
   }
 
@@ -73,6 +81,9 @@ export function parseFile(code: string, filePath: string): FileResult {
 
   // Track component names found in this file for JSX child resolution
   const componentSet = new Set<string>()
+
+  // A5: Use Set for O(1) edge deduplication
+  const edgeIdSet = new Set<string>()
 
   function registerComponent(
     name: string,
@@ -116,12 +127,31 @@ export function parseFile(code: string, filePath: string): FileResult {
     // Add context-subscription edges
     for (const ctxName of contextUsages) {
       const ctxId = contextMap.get(ctxName) ?? ctxName
-      edges.push({
-        id: `${ctxId}->${name}`,
-        source: ctxId,
-        target: name,
-        type: 'context-subscription',
-      })
+      const edgeId = `${ctxId}->${name}`
+      if (!edgeIdSet.has(edgeId)) {
+        edgeIdSet.add(edgeId)
+        edges.push({
+          id: edgeId,
+          source: ctxId,
+          target: name,
+          type: 'context-subscription',
+        })
+      }
+    }
+
+    // A4: Create Provider → Context edge
+    if (isContextProvider && contextName) {
+      const ctxId = contextMap.get(contextName) ?? contextName
+      const edgeId = `${name}->${ctxId}:provides`
+      if (!edgeIdSet.has(edgeId)) {
+        edgeIdSet.add(edgeId)
+        edges.push({
+          id: edgeId,
+          source: name,
+          target: ctxId,
+          type: 'context-provision',
+        })
+      }
     }
 
     return node
@@ -163,7 +193,7 @@ export function parseFile(code: string, filePath: string): FileResult {
       }
     },
 
-    // const MyComponent = () => { ... } or function() { ... }
+    // const MyComponent = () => { ... } or function() { ... } or memo(...) etc.
     VariableDeclarator(path: any) {
       if (!t.isIdentifier(path.node.id)) return
       const name = path.node.id.name
@@ -171,33 +201,50 @@ export function parseFile(code: string, filePath: string): FileResult {
       const init = path.node.init
       if (t.isArrowFunctionExpression(init) || t.isFunctionExpression(init)) {
         registerComponent(name, path, path.node.loc?.start.line ?? 0)
+        return
+      }
+      // A2: HOC / memo / forwardRef wrapping a function
+      if (t.isCallExpression(init)) {
+        const firstArg = (init as t.CallExpression).arguments[0]
+        if (
+          firstArg &&
+          (t.isArrowFunctionExpression(firstArg) ||
+            t.isFunctionExpression(firstArg) ||
+            t.isIdentifier(firstArg))
+        ) {
+          registerComponent(name, path, path.node.loc?.start.line ?? 0)
+        }
       }
     },
 
-    // export default function() { ... }
+    // A3: export default function() { ... } — derive name from filename
     ExportDefaultDeclaration(path: any) {
       const decl = path.node.declaration
-      if (
+      const isAnonFn =
         (t.isFunctionDeclaration(decl) || t.isArrowFunctionExpression(decl)) &&
-        !decl.id
-      ) {
-        // anonymous default export — skip for now
-      }
+        !(decl as any).id
+      if (!isAnonFn) return
+      const base = filePath.split('/').pop() ?? filePath
+      const name = base.replace(/\.[^.]+$/, '')
+      if (!isComponentName(name)) return
+      registerComponent(name, path, path.node.loc?.start.line ?? 0)
     },
   })
 
   // Third pass: find JSX parent→child relationships
   traverse(ast, {
     FunctionDeclaration(path: any) {
-      extractJSXChildren(path, edges, componentSet)
+      extractJSXChildren(path, edges, edgeIdSet, componentSet, externalComponents)
     },
     VariableDeclarator(path: any) {
       if (!t.isIdentifier(path.node.id)) return
       const name = path.node.id.name
       if (!isComponentName(name)) return
       const init = path.node.init
-      if (t.isArrowFunctionExpression(init) || t.isFunctionExpression(init)) {
-        extractJSXChildren(path, edges, componentSet, name)
+      const isFn = t.isArrowFunctionExpression(init) || t.isFunctionExpression(init)
+      const isWrapped = t.isCallExpression(init)
+      if (isFn || isWrapped) {
+        extractJSXChildren(path, edges, edgeIdSet, componentSet, externalComponents, name)
       }
     },
   })
@@ -208,7 +255,9 @@ export function parseFile(code: string, filePath: string): FileResult {
 function extractJSXChildren(
   path: any,
   edges: GraphEdge[],
+  edgeIdSet: Set<string>,
   componentSet: Set<string>,
+  externalComponents?: Set<string>,
   parentNameOverride?: string,
 ): void {
   const parentName =
@@ -216,23 +265,35 @@ function extractJSXChildren(
     (path.node.id?.name as string | undefined)
   if (!parentName || !isComponentName(parentName)) return
 
+  // A1: Use externalComponents (global set) when available for cross-file resolution
+  const allKnown = externalComponents ?? componentSet
+
   path.traverse({
     JSXOpeningElement(innerPath: any) {
       const el = innerPath.node.name
       let childName: string | undefined
+
       if (t.isJSXIdentifier(el) && isComponentName(el.name)) {
         childName = el.name
       }
-      if (!childName || !componentSet.has(childName)) return
-      const edgeId = `${parentName}->${childName}`
-      if (!edges.find((e) => e.id === edgeId)) {
-        edges.push({
-          id: edgeId,
-          source: parentName,
-          target: childName,
-          type: 'parent-child',
-        })
+
+      // A6: Handle <Namespace.Component /> — use namespace as the component reference
+      if (!childName && t.isJSXMemberExpression(el)) {
+        const ns = t.isJSXIdentifier(el.object) ? el.object.name : undefined
+        if (ns && allKnown.has(ns)) childName = ns
       }
+
+      if (!childName || !allKnown.has(childName)) return
+
+      const edgeId = `${parentName}->${childName}`
+      if (edgeIdSet.has(edgeId)) return  // A5: O(1) check
+      edgeIdSet.add(edgeId)
+      edges.push({
+        id: edgeId,
+        source: parentName,
+        target: childName,
+        type: 'parent-child',
+      })
     },
   })
 }
