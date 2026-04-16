@@ -14,6 +14,25 @@ interface FileResult {
 }
 
 /**
+ * Parses source code into a Babel AST. Returns `null` and warns on syntax errors
+ * so the caller can decide what to do (parseFile/parseFileFromAst skip those files).
+ * Exposed so `parseProject` can cache ASTs across passes (M3.3 — avoids re-parsing
+ * every file twice on each project scan).
+ */
+export function parseSource(code: string, filePath: string): t.File | null {
+  try {
+    return parse(code, {
+      sourceType: 'module',
+      plugins: ['jsx', 'typescript', 'decorators-legacy'],
+    })
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.warn(`[RSF] Failed to parse ${filePath}: ${msg}`)
+    return null
+  }
+}
+
+/**
  * Parses a single file and returns the nodes/edges it contributes to the graph.
  * Orchestration only — all detection logic lives in `./detectors/*`.
  */
@@ -23,6 +42,31 @@ export function parseFile(
   externalComponents?: Set<string>,
   globalStores: Map<string, string> = new Map(),
   detectors: Detector[] = createDefaultDetectors(),
+  globalReduxStores: Set<string> = new Set(),
+): FileResult {
+  const ast = parseSource(code, filePath)
+  if (!ast) return { nodes: [], edges: [] }
+  return parseFileFromAst(
+    ast,
+    filePath,
+    externalComponents,
+    globalStores,
+    detectors,
+    globalReduxStores,
+  )
+}
+
+/**
+ * Same as `parseFile`, but accepts a pre-parsed AST. Used by `parseProject` to
+ * avoid re-parsing the same file across pass-1 and pass-2.
+ */
+export function parseFileFromAst(
+  ast: t.File,
+  filePath: string,
+  externalComponents?: Set<string>,
+  globalStores: Map<string, string> = new Map(),
+  detectors: Detector[] = createDefaultDetectors(),
+  globalReduxStores: Set<string> = new Set(),
 ): FileResult {
   const nodes: GraphNode[] = []
   const edges: GraphEdge[] = []
@@ -30,23 +74,12 @@ export function parseFile(
   const edgeIdSet = new Set<string>()
   const componentSet = new Set<string>()
 
-  let ast: t.File
-  try {
-    ast = parse(code, {
-      sourceType: 'module',
-      plugins: ['jsx', 'typescript', 'decorators-legacy'],
-    })
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.warn(`[RSF] Failed to parse ${filePath}: ${msg}`)
-    return { nodes, edges }
-  }
-
   const ctx: ParseContext = {
     ast,
     filePath,
     externalComponents,
     globalStores,
+    globalReduxStores,
     addNode(node) {
       if (nodeIdSet.has(node.id)) return
       nodeIdSet.add(node.id)
