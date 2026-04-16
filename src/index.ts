@@ -1,20 +1,16 @@
-#!/usr/bin/env node
 import { createServer } from 'http'
 import { existsSync } from 'fs'
-import { resolve, join, dirname } from 'path'
-import { fileURLToPath } from 'url'
+import { resolve, join } from 'path'
 import express from 'express'
 import { WebSocketServer } from 'ws'
 import open from 'open'
 import pc from 'picocolors'
 import chokidar from 'chokidar'
-import { parseProject } from '@rsf/parser'
-import type { GraphData } from '@rsf/parser'
-
-const __dirname = dirname(fileURLToPath(import.meta.url))
+import { parseProject } from './parser/index.js'
+import type { GraphData } from './parser/index.js'
 
 const PORT = 7272
-const UI_DIST = resolve(__dirname, '../../packages/ui/dist')
+const UI_DIST = resolve(__dirname, 'ui')
 const UI_DEV_PORT = 7273
 
 // C2: Render event history ring buffer — replayed to new UI connections
@@ -80,7 +76,7 @@ async function main() {
       res.send(`
         <html><body style="font-family:monospace;background:#0f1117;color:#e2e8f0;padding:32px">
           <p>UI not built yet. Run:</p>
-          <pre style="color:#22c55e">cd packages/ui && pnpm dev</pre>
+          <pre style="color:#22c55e">cd ui && npm run dev</pre>
           <p>Then open <a style="color:#818cf8" href="http://localhost:${safeDevPort}">http://localhost:${safeDevPort}</a></p>
         </body></html>
       `)
