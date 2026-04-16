@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-04-16
+
 ### Added
 - Multi-store Redux support — each `configureStore` / `createStore` declaration
   now appears as its own node named after the variable. Components using
@@ -18,10 +20,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parser AST cache — `parseProject` now parses each source file once and
   reuses the AST across both passes, roughly halving cold parse time on
   larger projects.
-- Tightened component-name detection — `SCREAMING_SNAKE_CASE` constants
-  (`MAX_RETRIES`, `API_URL`, …) are no longer mistaken for components.
 - Community files — `CHANGELOG.md`, `CONTRIBUTING.md`, GitHub issue and PR
   templates.
+
+### Fixed
+- Tightened component-name detection — `SCREAMING_SNAKE_CASE` constants
+  (`MAX_RETRIES`, `API_URL`, …) are no longer mistaken for components.
+
+### Changed
+- **Behavior change:** Redux store node IDs now reflect the variable name
+  declared in source (`const appStore = configureStore(...)` → node `appStore`)
+  instead of always `ReduxStore`. The legacy `ReduxStore` id is still used
+  as a fallback when no `configureStore`/`createStore` declaration is found
+  in the scanned tree, so consumers whose store lives outside the scan
+  continue to work. Programmatic consumers of `/api/graph` that hardcoded
+  the id `ReduxStore` should switch to filtering by `node.storeLibrary === 'redux'`.
 
 ## [0.2.0] — 2026-04
 
@@ -54,7 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   live render counts, 800ms render flash, history replay across browser
   refreshes.
 
-[Unreleased]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/HoangSonDeveloper/React-State-Flow/releases/tag/v0.1.0
