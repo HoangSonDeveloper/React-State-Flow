@@ -1,6 +1,6 @@
 {
   "name": "react-state-flow",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Visualize React component hierarchy, state flow, and real-time render events",
   "type": "module",
   "license": "MIT",
