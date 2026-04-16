@@ -31,6 +31,14 @@ export interface ParseContext {
    * `create()` declaration.
    */
   readonly globalStores: Map<string, string>
+  /**
+   * Shared registry of Redux store names declared via `configureStore` / `createStore`.
+   * Populated during phase 1 across all files; consumed during phase 2 by the Redux
+   * detector to wire `useSelector`/`useDispatch` edges to known stores.
+   * `useSelector` cannot reference its store directly, so when multiple Redux stores
+   * exist in a project we connect the consuming component to all of them.
+   */
+  readonly globalReduxStores: Set<string>
   addNode(node: GraphNode): void
   addEdge(edge: GraphEdge): void
   hasNode(id: string): boolean

@@ -1,13 +1,9 @@
 import _traverse from '@babel/traverse'
 import * as t from '@babel/types'
 import type { Detector, ParseContext } from './types.js'
-import { isReactComponentSuper } from './discover-components.js'
+import { isReactComponentSuper, isComponentName } from './discover-components.js'
 
 const traverse = (_traverse as any).default ?? _traverse
-
-function isComponentName(name: string): boolean {
-  return /^[A-Z]/.test(name)
-}
 
 /**
  * Creates parent-child edges from JSX usage.

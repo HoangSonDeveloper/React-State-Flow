@@ -4,8 +4,12 @@ import type { ComponentInfo } from './types.js'
 
 const traverse = (_traverse as any).default ?? _traverse
 
-function isComponentName(name: string): boolean {
-  return /^[A-Z]/.test(name)
+export function isComponentName(name: string): boolean {
+  // Must start with an uppercase letter (PascalCase).
+  if (!/^[A-Z]/.test(name)) return false
+  // Exclude SCREAMING_SNAKE_CASE constants like MAX_RETRIES, API_URL.
+  if (/^[A-Z0-9_]+$/.test(name)) return false
+  return true
 }
 
 /**

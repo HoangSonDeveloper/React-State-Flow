@@ -49,6 +49,25 @@ describe('component detection', () => {
     expect(nodes).toHaveLength(0)
   })
 
+  it('ignores SCREAMING_SNAKE_CASE constants (M3.1)', () => {
+    const code = `
+      const MAX_RETRIES = computeMax()
+      const API_URL = process.env.URL
+      const HTTP_200 = 200
+    `
+    const { nodes } = parseFile(code, FILE)
+    expect(nodes).toHaveLength(0)
+  })
+
+  it('still detects mixed-case PascalCase identifiers (M3.1)', () => {
+    const code = `
+      const MyAPI = () => <div />
+      const HTTPClient = () => <div />
+    `
+    const { nodes } = parseFile(code, FILE)
+    expect(nodes.map((n) => n.id).sort()).toEqual(['HTTPClient', 'MyAPI'])
+  })
+
   it('derives component name from filename for anonymous export default', () => {
     const code = `export default function() { return <div /> }`
     const { nodes } = parseFile(code, 'src/Button.tsx')
@@ -234,25 +253,63 @@ describe('JSX parent-child edges', () => {
 // ---------------------------------------------------------------------------
 
 describe('redux', () => {
-  it('creates ReduxStore node for configureStore', () => {
-    const code = `const store = configureStore({ reducer: rootReducer })`
+  it('creates store node named after variable for configureStore (M3.5)', () => {
+    const code = `const appStore = configureStore({ reducer: rootReducer })`
     const { nodes } = parseFile(code, FILE)
     expect(nodes).toHaveLength(1)
     expect(nodes[0]).toMatchObject({
-      id: 'ReduxStore',
+      id: 'appStore',
       type: 'store',
       storeLibrary: 'redux',
     })
   })
 
-  it('creates ReduxStore node for createStore', () => {
-    const code = `const store = createStore(rootReducer)`
+  it('creates store node named after variable for createStore (M3.5)', () => {
+    const code = `const legacyStore = createStore(rootReducer)`
     const { nodes } = parseFile(code, FILE)
     expect(nodes[0]).toMatchObject({
-      id: 'ReduxStore',
+      id: 'legacyStore',
       type: 'store',
       storeLibrary: 'redux',
     })
+  })
+
+  it('creates separate nodes for multiple configureStore calls (M3.5)', () => {
+    const code = `
+      const userStore = configureStore({ reducer: userReducer })
+      const cartStore = configureStore({ reducer: cartReducer })
+    `
+    const { nodes } = parseFile(code, FILE)
+    const ids = nodes.map((n) => n.id).sort()
+    expect(ids).toEqual(['cartStore', 'userStore'])
+  })
+
+  it('wires useSelector edge to declared Redux store name (M3.5)', () => {
+    const code = `
+      const appStore = configureStore({ reducer: rootReducer })
+      function Counter() {
+        const count = useSelector((s) => s.count)
+        return <div>{count}</div>
+      }
+    `
+    const { edges } = parseFile(code, FILE)
+    const sub = edges.find((e) => e.type === 'store-subscription')
+    expect(sub).toMatchObject({ source: 'appStore', target: 'Counter' })
+  })
+
+  it('connects useSelector to all known Redux stores when ambiguous (M3.5)', () => {
+    const code = `
+      const userStore = configureStore({ reducer: userReducer })
+      const cartStore = configureStore({ reducer: cartReducer })
+      function Counter() {
+        const count = useSelector((s) => s.count)
+        return <div>{count}</div>
+      }
+    `
+    const { edges } = parseFile(code, FILE)
+    const subs = edges.filter((e) => e.type === 'store-subscription')
+    const sources = subs.map((e) => e.source).sort()
+    expect(sources).toEqual(['cartStore', 'userStore'])
   })
 
   it('creates store-subscription edge for useSelector', () => {

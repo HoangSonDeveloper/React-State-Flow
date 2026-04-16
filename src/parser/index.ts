@@ -1,6 +1,8 @@
 import { readFileSync, readdirSync, statSync } from 'fs'
 import { join, relative } from 'path'
-import { parseFile } from './parse-file.js'
+import type * as t from '@babel/types'
+import { parseFileFromAst, parseSource } from './parse-file.js'
+import { createDefaultDetectors } from './detectors/index.js'
 import type { GraphNode, GraphEdge } from './types.js'
 
 export type { GraphNode, GraphEdge } from './types.js'
@@ -43,13 +45,25 @@ export function parseProject(projectRoot: string, options: ParseProjectOptions =
   // file's detectors run. Lets cross-file store hooks resolve in pass 2 even
   // when the `create()` declaration lives in a different file.
   const globalStores = new Map<string, string>()
+  // Same shared-state idea for Redux store names so phase-2 useSelector edges
+  // can wire to stores declared in another file.
+  const globalReduxStores = new Set<string>()
 
-  // Pass 1: collect all component node ids for cross-file edge resolution
-  const globalComponentSet = new Set<string>()
+  // M3.3: Cache (read + AST-parse) per file once; both passes reuse the same
+  // AST. Skips files that fail to parse so they don't break the second pass.
+  const detectors = createDefaultDetectors()
+  const cache: { relPath: string; ast: t.File }[] = []
   for (const file of files) {
     const code = readFileSync(file, 'utf-8')
     const relPath = relative(projectRoot, file)
-    const { nodes } = parseFile(code, relPath, undefined, globalStores)
+    const ast = parseSource(code, relPath)
+    if (ast) cache.push({ relPath, ast })
+  }
+
+  // Pass 1: collect all component node ids for cross-file edge resolution
+  const globalComponentSet = new Set<string>()
+  for (const { relPath, ast } of cache) {
+    const { nodes } = parseFileFromAst(ast, relPath, undefined, globalStores, detectors, globalReduxStores)
     for (const n of nodes) {
       if (n.type === 'component') globalComponentSet.add(n.id)
     }
@@ -58,10 +72,8 @@ export function parseProject(projectRoot: string, options: ParseProjectOptions =
   // Pass 2: full parse with global component set for cross-file edges
   const allNodes: GraphNode[] = []
   const allEdges: GraphEdge[] = []
-  for (const file of files) {
-    const code = readFileSync(file, 'utf-8')
-    const relPath = relative(projectRoot, file)
-    const { nodes, edges } = parseFile(code, relPath, globalComponentSet, globalStores)
+  for (const { relPath, ast } of cache) {
+    const { nodes, edges } = parseFileFromAst(ast, relPath, globalComponentSet, globalStores, detectors, globalReduxStores)
     allNodes.push(...nodes)
     allEdges.push(...edges)
   }
