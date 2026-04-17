@@ -1,6 +1,8 @@
 import _traverse from '@babel/traverse'
 import * as t from '@babel/types'
 import type { ComponentInfo, Detector, ParseContext } from './types.js'
+import type { GraphNode } from '../types.js'
+import { createEdgeId } from '../symbol-id.js'
 
 const traverse = (_traverse as any).default ?? _traverse
 
@@ -27,41 +29,42 @@ export class ZustandDetector implements Detector {
         const callee = (init as t.CallExpression).callee
         if (!t.isIdentifier(callee, { name: 'create' })) return
 
-        const storeId = stripUsePrefix(id.name)
-        if (!storeId) return
+        const label = stripUsePrefix(id.name)
+        if (!label) return
 
-        ctx.globalStores.set(id.name, storeId)
-        ctx.addNode({
-          id: storeId,
+        const node: GraphNode = {
+          id: ctx.createNodeId('store', id.name),
           type: 'store',
-          label: storeId,
+          label,
           file: ctx.filePath,
           line: path.node.loc?.start.line ?? 0,
           stateSlots: [],
           isContextProvider: false,
           storeLibrary: 'zustand',
-        })
+        }
+        ctx.addNode(node)
+        ctx.addLocalSymbol(id.name, node)
       },
     })
   }
 
   enrichComponent(component: ComponentInfo, ctx: ParseContext): void {
     const storeIds = new Set<string>()
-    const hookMap = ctx.globalStores
+    const componentId = ctx.createNodeId('component', component.symbolKey)
     component.path.traverse({
       CallExpression(innerPath: any) {
         const callee = innerPath.node.callee
         if (!t.isIdentifier(callee)) return
-        const storeId = hookMap.get(callee.name)
-        if (storeId) storeIds.add(storeId)
+        const resolved = ctx.resolveLocalOrImportedSymbol(callee.name, 'store')
+        if (resolved?.storeLibrary === 'zustand') storeIds.add(resolved.id)
       },
     })
 
     for (const storeId of storeIds) {
       ctx.addEdge({
-        id: `${storeId}->${component.name}`,
+        id: createEdgeId('store-subscription', storeId, componentId),
         source: storeId,
-        target: component.name,
+        target: componentId,
         type: 'store-subscription',
       })
     }

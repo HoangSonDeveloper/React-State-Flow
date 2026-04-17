@@ -6,6 +6,8 @@ import type {
   Detector,
   ParseContext,
 } from './types.js'
+import type { GraphNode } from '../types.js'
+import { createEdgeId } from '../symbol-id.js'
 
 const traverse = (_traverse as any).default ?? _traverse
 
@@ -18,7 +20,6 @@ const traverse = (_traverse as any).default ?? _traverse
  */
 export class ContextDetector implements Detector {
   readonly name = 'context'
-  private readonly contextMap = new Map<string, string>()
 
   detectDeclarations(ctx: ParseContext): void {
     traverse(ctx.ast, {
@@ -31,31 +32,35 @@ export class ContextDetector implements Detector {
         if (!t.isIdentifier(callee, { name: 'createContext' })) return
 
         const name = id.name
-        this.contextMap.set(name, name)
-        ctx.addNode({
-          id: name,
+        const node: GraphNode = {
+          id: ctx.createNodeId('context', name),
           type: 'context',
           label: name,
           file: ctx.filePath,
           line: path.node.loc?.start.line ?? 0,
           stateSlots: [],
           isContextProvider: false,
-        })
+        }
+        ctx.addNode(node)
+        ctx.addLocalSymbol(name, node)
       },
     })
   }
 
   enrichComponent(component: ComponentInfo, ctx: ParseContext): ComponentEnrichment {
-    const contextUsages: string[] = []
+    const contextUsages = new Set<string>()
     let isContextProvider = false
     let contextName: string | undefined
+    const componentId = ctx.createNodeId('component', component.symbolKey)
 
     component.path.traverse({
       CallExpression(innerPath: any) {
         const callee = innerPath.node.callee
         if (!t.isIdentifier(callee, { name: 'useContext' })) return
         const arg = innerPath.node.arguments[0]
-        if (t.isIdentifier(arg)) contextUsages.push(arg.name)
+        if (!t.isIdentifier(arg)) return
+        const resolved = ctx.resolveLocalOrImportedSymbol(arg.name, 'context')
+        if (resolved) contextUsages.add(resolved.id)
       },
       // Class component: `static contextType = ThemeContext`
       ClassProperty(innerPath: any) {
@@ -65,7 +70,8 @@ export class ContextDetector implements Detector {
           t.isIdentifier(node.key, { name: 'contextType' }) &&
           t.isIdentifier(node.value)
         ) {
-          contextUsages.push(node.value.name)
+          const resolved = ctx.resolveLocalOrImportedSymbol(node.value.name, 'context')
+          if (resolved) contextUsages.add(resolved.id)
         }
       },
       JSXOpeningElement(innerPath: any) {
@@ -76,31 +82,27 @@ export class ContextDetector implements Detector {
           t.isJSXIdentifier(el.property, { name: 'Provider' }) &&
           t.isJSXIdentifier(el.object)
         ) {
+          const resolved = ctx.resolveLocalOrImportedSymbol(el.object.name, 'context')
+          if (!resolved) return
           isContextProvider = true
-          contextName = el.object.name
+          contextName = resolved.label
+          ctx.addEdge({
+            id: createEdgeId('context-provision', componentId, resolved.id),
+            source: componentId,
+            target: resolved.id,
+            type: 'context-provision',
+          })
         }
       },
     })
 
     // context-subscription edges
-    for (const ctxName of contextUsages) {
-      const ctxId = this.contextMap.get(ctxName) ?? ctxName
+    for (const ctxId of contextUsages) {
       ctx.addEdge({
-        id: `${ctxId}->${component.name}`,
+        id: createEdgeId('context-subscription', ctxId, componentId),
         source: ctxId,
-        target: component.name,
+        target: componentId,
         type: 'context-subscription',
-      })
-    }
-
-    // context-provision edge
-    if (isContextProvider && contextName) {
-      const ctxId = this.contextMap.get(contextName) ?? contextName
-      ctx.addEdge({
-        id: `${component.name}->${ctxId}:provides`,
-        source: component.name,
-        target: ctxId,
-        type: 'context-provision',
       })
     }
 

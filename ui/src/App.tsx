@@ -148,6 +148,19 @@ function FlowCanvas() {
     }
   }, [graph, searchQuery, showContexts, showStores])
 
+  const duplicateComponentLabels = useMemo(() => {
+    if (!graph) return []
+    const counts = new Map<string, number>()
+    for (const node of graph.nodes) {
+      if (node.type !== 'component') continue
+      counts.set(node.label, (counts.get(node.label) ?? 0) + 1)
+    }
+    return [...counts.entries()]
+      .filter(([, count]) => count > 1)
+      .map(([label]) => label)
+      .sort()
+  }, [graph])
+
   // D1 Effect 1: Rebuild layout when graph topology or filter changes.
   // M3.4: When topology (node + edge id sets) is unchanged, keep existing node
   // positions and only refresh static data fields. fitView is suppressed in that
@@ -327,28 +340,45 @@ function FlowCanvas() {
         </div>
       </div>
 
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      {duplicateComponentLabels.length > 0 && (
+        <div
+          style={{
+            background: '#2a1f0e',
+            color: '#fcd34d',
+            borderBottom: '1px solid #5b4518',
+            fontFamily: 'monospace',
+            fontSize: 11,
+            padding: '8px 16px',
+          }}
+        >
+          Duplicate component names detected ({duplicateComponentLabels.slice(0, 3).join(', ')}
+          {duplicateComponentLabels.length > 3 ? ', ...' : ''}). Zero-config runtime tracking hides ambiguous names to avoid mapping renders to the wrong node. Install the optional Vite plugin from <code>react-state-flow/vite</code> for exact runtime IDs.
+        </div>
+      )}
       <div style={{ flex: 1, minHeight: 0 }}>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        nodeTypes={nodeTypes}
-        onNodeClick={handleNodeClick}
-        onInit={(instance) => { rfInstanceRef.current = instance }}
-        nodesConnectable={false}
-        edgesUpdatable={false}
-        fitView
-        fitViewOptions={{ padding: 0.15, minZoom: 0.2 }}
-        style={{ background: '#0f1117', width: '100%', height: '100%' }}
-      >
-        <Background color="#1e2235" gap={24} />
-        <Controls style={{ background: '#1a1d27', border: '1px solid #2e3348' }} />
-        <MiniMap
-          style={{ background: '#1a1d27', border: '1px solid #2e3348' }}
-          nodeColor={(n) => (n.type === 'context' ? '#4338ca' : '#334155')}
-        />
-      </ReactFlow>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          nodeTypes={nodeTypes}
+          onNodeClick={handleNodeClick}
+          onInit={(instance) => { rfInstanceRef.current = instance }}
+          nodesConnectable={false}
+          edgesUpdatable={false}
+          fitView
+          fitViewOptions={{ padding: 0.15, minZoom: 0.2 }}
+          style={{ background: '#0f1117', width: '100%', height: '100%' }}
+        >
+          <Background color="#1e2235" gap={24} />
+          <Controls style={{ background: '#1a1d27', border: '1px solid #2e3348' }} />
+          <MiniMap
+            style={{ background: '#1a1d27', border: '1px solid #2e3348' }}
+            nodeColor={(n) => (n.type === 'context' ? '#4338ca' : '#334155')}
+          />
+        </ReactFlow>
+      </div>
       </div>
     </div>
   )

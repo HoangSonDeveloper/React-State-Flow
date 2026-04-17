@@ -47,7 +47,7 @@ export function discoverComponents(
     FunctionDeclaration(path: any) {
       const name = path.node.id?.name
       if (name && isComponentName(name)) {
-        onComponent({ name, path, line: path.node.loc?.start.line ?? 0 })
+        onComponent({ name, symbolKey: name, bindingName: name, path, line: path.node.loc?.start.line ?? 0 })
       }
     },
 
@@ -55,7 +55,7 @@ export function discoverComponents(
       const name = path.node.id?.name
       if (!name || !isComponentName(name)) return
       if (!isReactComponentSuper(path.node.superClass)) return
-      onComponent({ name, path, line: path.node.loc?.start.line ?? 0 })
+      onComponent({ name, symbolKey: name, bindingName: name, path, line: path.node.loc?.start.line ?? 0 })
     },
 
     VariableDeclarator(path: any) {
@@ -65,7 +65,7 @@ export function discoverComponents(
 
       const init = path.node.init
       if (t.isArrowFunctionExpression(init) || t.isFunctionExpression(init)) {
-        onComponent({ name, path, line: path.node.loc?.start.line ?? 0 })
+        onComponent({ name, symbolKey: name, bindingName: name, path, line: path.node.loc?.start.line ?? 0 })
         return
       }
 
@@ -78,7 +78,7 @@ export function discoverComponents(
             t.isFunctionExpression(firstArg) ||
             t.isIdentifier(firstArg))
         ) {
-          onComponent({ name, path, line: path.node.loc?.start.line ?? 0 })
+          onComponent({ name, symbolKey: name, bindingName: name, path, line: path.node.loc?.start.line ?? 0 })
         }
       }
     },
@@ -95,7 +95,7 @@ export function discoverComponents(
       const name = base.replace(/\.[^.]+$/, '')
       if (!isComponentName(name)) return
 
-      onComponent({ name, path, line: path.node.loc?.start.line ?? 0 })
+      onComponent({ name, symbolKey: 'default', path, line: path.node.loc?.start.line ?? 0 })
     },
   })
 }

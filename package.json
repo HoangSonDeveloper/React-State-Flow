@@ -35,6 +35,14 @@
     "./runtime": {
       "import": "./dist/runtime/index.js",
       "types": "./dist/runtime/index.d.ts"
+    },
+    "./runtime/register": {
+      "import": "./dist/runtime/register.js",
+      "types": "./dist/runtime/register.d.ts"
+    },
+    "./vite": {
+      "import": "./dist/vite.js",
+      "types": "./dist/vite.d.ts"
     }
   },
   "files": [

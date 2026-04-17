@@ -1,74 +1,48 @@
-import _traverse from '@babel/traverse'
 import * as t from '@babel/types'
-import type { Detector, ParseContext } from './types.js'
-import { isReactComponentSuper, isComponentName } from './discover-components.js'
-
-const traverse = (_traverse as any).default ?? _traverse
+import type { ComponentInfo, Detector, ParseContext } from './types.js'
+import { discoverComponents, isComponentName } from './discover-components.js'
+import { createEdgeId } from '../symbol-id.js'
 
 /**
  * Creates parent-child edges from JSX usage.
- * Runs in phase 3 so it can see every component discovered in this file
- * (or globally via ctx.externalComponents for cross-file resolution).
+ * Runs in phase 3 so it can resolve same-file declarations first, then imports.
  */
 export class JSXChildrenDetector implements Detector {
   readonly name = 'jsx-children'
 
   detectEdges(ctx: ParseContext): void {
-    const known = ctx.externalComponents ?? ctx.getComponentSet()
-
-    traverse(ctx.ast, {
-      FunctionDeclaration: (path: any) => {
-        this.extractChildren(path, ctx, known)
-      },
-      VariableDeclarator: (path: any) => {
-        if (!t.isIdentifier(path.node.id)) return
-        const name = path.node.id.name
-        if (!isComponentName(name)) return
-
-        const init = path.node.init
-        const isFn = t.isArrowFunctionExpression(init) || t.isFunctionExpression(init)
-        const isWrapped = t.isCallExpression(init)
-        if (isFn || isWrapped) {
-          this.extractChildren(path, ctx, known, name)
-        }
-      },
-      ClassDeclaration: (path: any) => {
-        if (!isReactComponentSuper(path.node.superClass)) return
-        this.extractChildren(path, ctx, known)
-      },
+    discoverComponents(ctx.ast, ctx.filePath, (component) => {
+      this.extractChildren(component, ctx)
     })
   }
 
-  private extractChildren(
-    path: any,
-    ctx: ParseContext,
-    known: ReadonlySet<string>,
-    parentOverride?: string,
-  ): void {
-    const parentName = parentOverride ?? (path.node.id?.name as string | undefined)
-    if (!parentName || !isComponentName(parentName)) return
+  private extractChildren(component: ComponentInfo, ctx: ParseContext): void {
+    const parentId = ctx.createNodeId('component', component.symbolKey)
 
-    path.traverse({
+    component.path.traverse({
       JSXOpeningElement(innerPath: any) {
         const el = innerPath.node.name
-        let childName: string | undefined
+        let child = undefined
 
         if (t.isJSXIdentifier(el) && isComponentName(el.name)) {
-          childName = el.name
+          child = ctx.resolveLocalOrImportedSymbol(el.name, 'component')
         }
 
-        // <Namespace.Component /> — treat Namespace as the reference
-        if (!childName && t.isJSXMemberExpression(el)) {
-          const ns = t.isJSXIdentifier(el.object) ? el.object.name : undefined
-          if (ns && known.has(ns)) childName = ns
+        if (!child && t.isJSXMemberExpression(el)) {
+          const namespaceName = t.isJSXIdentifier(el.object) ? el.object.name : undefined
+          const memberName = t.isJSXIdentifier(el.property) ? el.property.name : undefined
+          if (namespaceName && memberName) {
+            child = ctx.resolveImportedMemberSymbol(namespaceName, memberName, 'component')
+              ?? ctx.resolveLocalOrImportedSymbol(namespaceName, 'component')
+          }
         }
 
-        if (!childName || !known.has(childName)) return
+        if (!child) return
 
         ctx.addEdge({
-          id: `${parentName}->${childName}`,
-          source: parentName,
-          target: childName,
+          id: createEdgeId('parent-child', parentId, child.id),
+          source: parentId,
+          target: child.id,
           type: 'parent-child',
         })
       },

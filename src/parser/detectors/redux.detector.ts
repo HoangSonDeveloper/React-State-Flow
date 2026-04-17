@@ -1,21 +1,16 @@
 import _traverse from '@babel/traverse'
 import * as t from '@babel/types'
 import type { ComponentInfo, Detector, ParseContext } from './types.js'
+import type { GraphNode } from '../types.js'
+import { REDUX_AMBIGUOUS_STORE_ID, createEdgeId } from '../symbol-id.js'
 
 const traverse = (_traverse as any).default ?? _traverse
 
-/** Fallback node id used when a component calls useSelector/useDispatch but no store declaration was discovered. */
-const FALLBACK_REDUX_STORE_ID = 'ReduxStore'
-
 /**
  * Redux detector.
- *   - Phase 1: for each `const xxx = configureStore(…)` / `createStore(…)` call, adds a
- *     store node whose id is the variable name, and records the name in
- *     `ctx.globalReduxStores` so phase 2 can resolve edges across files.
- *     Anonymous (non-`VariableDeclarator`) stores fall back to the shared id "ReduxStore".
- *   - Phase 2: for each component that uses `useSelector`/`useDispatch`, adds a
- *     store-subscription edge to every known Redux store. When none were discovered
- *     (e.g. store lives outside scanned files), lazily creates the `ReduxStore` fallback.
+ *   - Phase 1: finds Redux store declarations.
+ *   - Phase 2: connects consumers to the single exact store when the project has one,
+ *     otherwise to a shared ambiguous virtual store node.
  */
 export class ReduxDetector implements Detector {
   readonly name = 'redux'
@@ -29,9 +24,20 @@ export class ReduxDetector implements Detector {
         if (!isReduxStoreFactory(callee)) return
 
         const id = path.node.id
-        const storeId = t.isIdentifier(id) ? id.name : FALLBACK_REDUX_STORE_ID
-        this.ensureStoreNode(ctx, storeId, path.node.loc?.start.line ?? 0)
-        ctx.globalReduxStores.add(storeId)
+        if (!t.isIdentifier(id)) return
+
+        const node: GraphNode = {
+          id: ctx.createNodeId('store', id.name),
+          type: 'store',
+          label: id.name,
+          file: ctx.filePath,
+          line: path.node.loc?.start.line ?? 0,
+          stateSlots: [],
+          isContextProvider: false,
+          storeLibrary: 'redux',
+        }
+        ctx.addNode(node)
+        ctx.addLocalSymbol(id.name, node)
       },
     })
   }
@@ -50,36 +56,18 @@ export class ReduxDetector implements Detector {
 
     if (!usesRedux) return
 
-    const targets = ctx.globalReduxStores.size > 0
-      ? [...ctx.globalReduxStores]
-      : [FALLBACK_REDUX_STORE_ID]
+    const componentId = ctx.createNodeId('component', component.symbolKey)
+    const target = ctx.getReduxSubscriptionTarget()
 
-    // Lazily create the fallback node when the store lives outside the scanned tree.
-    if (ctx.globalReduxStores.size === 0) {
-      this.ensureStoreNode(ctx, FALLBACK_REDUX_STORE_ID, component.line)
+    if (target.id === REDUX_AMBIGUOUS_STORE_ID && !ctx.hasNode(target.id)) {
+      ctx.addNode(target)
     }
 
-    for (const storeId of targets) {
-      ctx.addEdge({
-        id: `${storeId}->${component.name}`,
-        source: storeId,
-        target: component.name,
-        type: 'store-subscription',
-      })
-    }
-  }
-
-  private ensureStoreNode(ctx: ParseContext, id: string, line: number): void {
-    if (ctx.hasNode(id)) return
-    ctx.addNode({
-      id,
-      type: 'store',
-      label: id,
-      file: ctx.filePath,
-      line,
-      stateSlots: [],
-      isContextProvider: false,
-      storeLibrary: 'redux',
+    ctx.addEdge({
+      id: createEdgeId('store-subscription', target.id, componentId),
+      source: target.id,
+      target: componentId,
+      type: 'store-subscription',
     })
   }
 }

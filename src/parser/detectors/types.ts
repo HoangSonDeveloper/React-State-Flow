@@ -1,9 +1,12 @@
 import type * as t from '@babel/types'
-import type { GraphNode, GraphEdge } from '../types.js'
+import type { GraphNode, GraphEdge, NodeType } from '../types.js'
+import type { ProjectIndex } from '../project-index.js'
 
 /** Info about a component discovered in the second pass. */
 export interface ComponentInfo {
   name: string
+  symbolKey: string
+  bindingName?: string
   path: any
   line: number
 }
@@ -23,27 +26,16 @@ export interface ComponentEnrichment {
 export interface ParseContext {
   readonly ast: t.File
   readonly filePath: string
-  readonly externalComponents?: ReadonlySet<string>
-  /**
-   * Shared registry of store-hook names → store node id, populated across files.
-   * Used by detectors (e.g. Zustand) whose hook names are user-defined and must
-   * be resolved even when the hook is consumed in a different file than the
-   * `create()` declaration.
-   */
-  readonly globalStores: Map<string, string>
-  /**
-   * Shared registry of Redux store names declared via `configureStore` / `createStore`.
-   * Populated during phase 1 across all files; consumed during phase 2 by the Redux
-   * detector to wire `useSelector`/`useDispatch` edges to known stores.
-   * `useSelector` cannot reference its store directly, so when multiple Redux stores
-   * exist in a project we connect the consuming component to all of them.
-   */
-  readonly globalReduxStores: Set<string>
+  readonly project?: ProjectIndex
   addNode(node: GraphNode): void
   addEdge(edge: GraphEdge): void
   hasNode(id: string): boolean
-  registerComponent(name: string): void
-  getComponentSet(): ReadonlySet<string>
+  addLocalSymbol(localName: string, node: GraphNode): void
+  setAnonymousDefaultSymbol(node: GraphNode): void
+  resolveLocalOrImportedSymbol(localName: string, expectedType?: NodeType): GraphNode | undefined
+  resolveImportedMemberSymbol(namespaceName: string, memberName: string, expectedType?: NodeType): GraphNode | undefined
+  getReduxSubscriptionTarget(): GraphNode
+  createNodeId(type: NodeType, symbolKey: string): string
 }
 
 /**
