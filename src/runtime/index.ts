@@ -89,8 +89,7 @@ function hookIntoReact(win: Window) {
   const existing = win.__REACT_DEVTOOLS_GLOBAL_HOOK__ ?? {}
   const originalOnCommitFiberRoot = existing.onCommitFiberRoot?.bind(existing) ?? (() => {})
 
-  win.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
-    ...existing,
+  const overrides = {
     isDisabled: false,
     supportsFiber: true,
     onCommitFiberRoot(rendererID: number, root: any, priorityLevel: any) {
@@ -102,6 +101,15 @@ function hookIntoReact(win: Window) {
         // Never break the app.
       }
     },
+  }
+
+  try {
+    // Normal case: no DevTools extension, property is writable.
+    win.__REACT_DEVTOOLS_GLOBAL_HOOK__ = { ...existing, ...overrides }
+  } catch {
+    // React DevTools extension defines the property as getter-only via Object.defineProperty.
+    // Mutate the existing hook object in place instead.
+    Object.assign(existing, overrides)
   }
 }
 

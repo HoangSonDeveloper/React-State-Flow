@@ -8,7 +8,7 @@ Visualize React component state and re-render flow in real time.
 
 Parses your React codebase into an interactive graph, then overlays live render data from your running app — so you can see which components re-render, how often, how state flows through the tree, and **which re-renders are wasted**.
 
-![React State Flow graph view](docs/screenshots/graph.png)
+![React State Flow demo](examples/demo/demo-assets/demo.gif)
 
 ## Why not React DevTools?
 
