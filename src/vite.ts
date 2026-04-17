@@ -1,4 +1,5 @@
 import type { File } from '@babel/types'
+import MagicString from 'magic-string'
 import { relative } from 'path'
 import type { Plugin } from 'vite'
 import { discoverComponents } from './parser/detectors/discover-components.js'
@@ -17,6 +18,8 @@ export function reactStateFlowVitePlugin(): Plugin {
       root = config.root
     },
     transform(code, id) {
+      if (code.includes('__rsfRegister(')) return null
+
       const cleanId = id.split('?')[0]
       if (
         !/\.(tsx|ts|jsx|js)$/.test(cleanId) ||
@@ -52,7 +55,7 @@ export function reactStateFlowVitePlugin(): Plugin {
       if (changes.length === 0) return null
 
       const importInsertionPos = getImportInsertionPos(ast)
-      let transformed = code
+      const transformed = new MagicString(code)
       const insertions = [
         ...changes,
         {
@@ -63,15 +66,16 @@ export function reactStateFlowVitePlugin(): Plugin {
       ].sort((a, b) => b.start - a.start)
 
       for (const insertion of insertions) {
-        transformed =
-          transformed.slice(0, insertion.start) +
-          insertion.text +
-          transformed.slice(insertion.end)
+        if (insertion.start === insertion.end) {
+          transformed.appendLeft(insertion.start, insertion.text)
+        } else {
+          transformed.overwrite(insertion.start, insertion.end, insertion.text)
+        }
       }
 
       return {
-        code: transformed,
-        map: null,
+        code: transformed.toString(),
+        map: transformed.generateMap({ hires: true }),
       }
     },
   }

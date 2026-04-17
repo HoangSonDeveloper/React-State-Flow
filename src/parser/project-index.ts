@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'fs'
 import { dirname, join, relative, resolve } from 'path'
 import type * as t from '@babel/types'
-import ts from 'typescript'
+import { parse } from 'jsonc-parser'
 import type { GraphNode } from './types.js'
 import { REDUX_AMBIGUOUS_STORE_FILE, REDUX_AMBIGUOUS_STORE_ID, REDUX_AMBIGUOUS_STORE_LABEL } from './symbol-id.js'
 import { normalizePath } from './path-utils.js'
@@ -347,9 +347,8 @@ function loadTsConfigPaths(projectRoot: string): TsConfigPaths | undefined {
 function parseTsConfigPaths(tsConfigPath: string): TsConfigPaths | undefined {
   try {
     const raw = readFileSync(tsConfigPath, 'utf-8')
-    const parsedResult = ts.parseConfigFileTextToJson(tsConfigPath, raw)
-    if (parsedResult.error || !parsedResult.config) return undefined
-    const parsed = parsedResult.config
+    const parsed = parse(raw)
+    if (!parsed || typeof parsed !== 'object') return undefined
     const compilerOptions = parsed?.compilerOptions ?? {}
     const rawPaths = compilerOptions?.paths
     const paths: PathAliasEntry[] = []
