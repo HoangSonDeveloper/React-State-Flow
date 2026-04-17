@@ -25,7 +25,7 @@ export class ZustandDetector implements Detector {
         const id = path.node.id
         if (!t.isCallExpression(init) || !t.isIdentifier(id)) return
 
-        if (!isZustandCreateCall(init, ctx)) return
+        if (!isZustandCreate(init, ctx)) return
 
         const label = stripUsePrefix(id.name)
         if (!label) return
@@ -75,11 +75,11 @@ function stripUsePrefix(name: string): string | null {
   return name.slice(3)
 }
 
-function isZustandCreateCall(node: t.CallExpression, ctx: ParseContext): boolean {
-  return getZustandCreateKind(node.callee, ctx)
+function isZustandCreate(node: t.CallExpression, ctx: ParseContext): boolean {
+  return isZustandCreateExpression(node.callee, ctx)
 }
 
-function getZustandCreateKind(node: t.Node, ctx: ParseContext): boolean {
+function isZustandCreateExpression(node: t.Node, ctx: ParseContext): boolean {
   if (t.isIdentifier(node)) {
     if (node.name === 'create') return true
     const binding = ctx.getImportBinding(node.name)
@@ -96,11 +96,11 @@ function getZustandCreateKind(node: t.Node, ctx: ParseContext): boolean {
   }
 
   if (t.isCallExpression(node)) {
-    return getZustandCreateKind(node.callee, ctx)
+    return isZustandCreateExpression(node.callee, ctx)
   }
 
   if (t.isTSInstantiationExpression(node)) {
-    return getZustandCreateKind(node.expression, ctx)
+    return isZustandCreateExpression(node.expression, ctx)
   }
 
   return false
