@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import type { RenderEvent, RuntimeState, GraphData } from './types.js'
-import { buildRuntimeHistorySnapshot } from './runtimeHistory.js'
+import { buildRuntimeHistorySnapshot } from '../../src/runtime/history.js'
 
 const FLASH_DURATION = 800 // ms
 

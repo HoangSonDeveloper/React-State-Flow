@@ -43,18 +43,17 @@ export function parseProject(projectRoot: string, options: ParseProjectOptions =
   const ignores = new Set([...DEFAULT_IGNORES, ...(options.ignore ?? [])])
   const files = collectFiles(projectRoot, ignores)
 
-  const cache: { absPath: string; ast: t.File; relPath: string }[] = []
+  const cache: { ast: t.File; relPath: string }[] = []
   for (const file of files) {
     const code = readFileSync(file, 'utf-8')
     const relPath = normalizePath(relative(projectRoot, file))
     const ast = parseSource(code, relPath)
-    if (ast) cache.push({ absPath: file, relPath, ast })
+    if (ast) cache.push({ relPath, ast })
   }
 
   const firstPass: FilePassData[] = cache.map(({ ast, relPath }) => {
-    const parsed = parseFileFromAst(ast, relPath)
+    const parsed = parseFileFromAst(ast, relPath, { metadataOnly: true })
     return {
-      ast,
       relPath,
       moduleInfo: collectModuleInfo(ast),
       localSymbols: parsed.metadata.localSymbols,

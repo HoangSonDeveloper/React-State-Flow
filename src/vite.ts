@@ -1,3 +1,4 @@
+import type { File } from '@babel/types'
 import { relative } from 'path'
 import type { Plugin } from 'vite'
 import { discoverComponents } from './parser/detectors/discover-components.js'
@@ -28,33 +29,44 @@ export function reactStateFlowVitePlugin(): Plugin {
       const ast = parseSource(code, relPath)
       if (!ast) return null
 
-      const registrations: Array<{ pos: number; text: string }> = []
+      const changes: Array<{ start: number; end: number; text: string }> = []
       discoverComponents(ast, relPath, (component) => {
-        if (!component.bindingName) return
+        const componentId = createNodeId('component', relPath, component.symbolKey)
+
+        if (!component.bindingName) {
+          const replacement = createAnonymousDefaultRegistration(code, component.path, componentId)
+          if (replacement) changes.push(replacement)
+          return
+        }
 
         const pos = getRegistrationInsertPos(component.path)
         if (pos == null) return
 
-        registrations.push({
-          pos,
-          text: `\n__rsfRegister(${component.bindingName}, { id: ${JSON.stringify(createNodeId('component', relPath, component.symbolKey))} });`,
+        changes.push({
+          start: pos,
+          end: pos,
+          text: `\n__rsfRegister(${component.bindingName}, { id: ${JSON.stringify(componentId)} });`,
         })
       })
 
-      if (registrations.length === 0) return null
+      if (changes.length === 0) return null
 
       const importInsertionPos = getImportInsertionPos(ast)
       let transformed = code
       const insertions = [
-        ...registrations,
+        ...changes,
         {
-          pos: importInsertionPos,
+          start: importInsertionPos,
+          end: importInsertionPos,
           text: `import { registerComponent as __rsfRegister } from 'react-state-flow/runtime/register'\n`,
         },
-      ].sort((a, b) => b.pos - a.pos)
+      ].sort((a, b) => b.start - a.start)
 
       for (const insertion of insertions) {
-        transformed = transformed.slice(0, insertion.pos) + insertion.text + transformed.slice(insertion.pos)
+        transformed =
+          transformed.slice(0, insertion.start) +
+          insertion.text +
+          transformed.slice(insertion.end)
       }
 
       return {
@@ -65,7 +77,7 @@ export function reactStateFlowVitePlugin(): Plugin {
   }
 }
 
-function getImportInsertionPos(ast: Parameters<typeof discoverComponents>[0]): number {
+function getImportInsertionPos(ast: File): number {
   const imports = ast.program.body.filter((node) => node.type === 'ImportDeclaration')
   if (imports.length === 0) return 0
   return imports[imports.length - 1].end ?? 0
@@ -83,4 +95,36 @@ function getRegistrationInsertPos(path: any): number | undefined {
   }
 
   return targetPath.node?.end
+}
+
+function createAnonymousDefaultRegistration(
+  code: string,
+  path: any,
+  componentId: string,
+): { start: number; end: number; text: string } | null {
+  if (!path.isExportDefaultDeclaration?.()) return null
+
+  const declaration = path.node.declaration
+  const start = path.node.start
+  const end = path.node.end
+  const declarationStart = declaration?.start
+  const declarationEnd = declaration?.end
+  if (
+    typeof start !== 'number' ||
+    typeof end !== 'number' ||
+    typeof declarationStart !== 'number' ||
+    typeof declarationEnd !== 'number'
+  ) {
+    return null
+  }
+
+  const declarationSource = code.slice(declarationStart, declarationEnd)
+  const defaultBinding = '__rsfDefaultComponent'
+  return {
+    start,
+    end,
+    text:
+      `const ${defaultBinding} = __rsfRegister(${declarationSource}, { id: ${JSON.stringify(componentId)} });\n` +
+      `export default ${defaultBinding}`,
+  }
 }

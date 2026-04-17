@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'fs'
 import { dirname, join, relative, resolve } from 'path'
 import type * as t from '@babel/types'
+import ts from 'typescript'
 import type { GraphNode } from './types.js'
 import { REDUX_AMBIGUOUS_STORE_FILE, REDUX_AMBIGUOUS_STORE_ID, REDUX_AMBIGUOUS_STORE_LABEL } from './symbol-id.js'
 import { normalizePath } from './path-utils.js'
@@ -24,7 +25,6 @@ export interface RawModuleInfo {
 }
 
 export interface FilePassData {
-  ast: t.File
   relPath: string
   moduleInfo: RawModuleInfo
   localSymbols: Map<string, GraphNode>
@@ -136,8 +136,19 @@ export function buildProjectIndex(projectRoot: string, files: FilePassData[]): P
   const fileSet = new Set(files.map((file) => file.relPath))
   const tsConfigPaths = loadTsConfigPaths(projectRoot)
   const resolutionCache = new Map<string, string | undefined>()
-  const exportCache = new Map<string, GraphNode | undefined>()
+  const exportCache = new Map<string, GraphNode>()
+  const missingExportCache = new Set<string>()
   const reduxStoreIds = files.flatMap((file) => file.reduxStoreIds)
+  const nodeById = new Map<string, GraphNode>()
+  for (const file of files) {
+    for (const symbol of file.localSymbols.values()) {
+      nodeById.set(symbol.id, symbol)
+    }
+    if (file.anonymousDefaultSymbol) {
+      nodeById.set(file.anonymousDefaultSymbol.id, file.anonymousDefaultSymbol)
+    }
+  }
+  const singleReduxStore = reduxStoreIds.length === 1 ? nodeById.get(reduxStoreIds[0]) : undefined
 
   function resolveImportTarget(filePath: string, specifier: string): string | undefined {
     const cacheKey = `${filePath}::${specifier}`
@@ -148,40 +159,62 @@ export function buildProjectIndex(projectRoot: string, files: FilePassData[]): P
     return resolved
   }
 
-  function resolveExport(filePath: string, exportName: string, seen = new Set<string>()): GraphNode | undefined {
+  function resolveExport(
+    filePath: string,
+    exportName: string,
+    seen = new Set<string>(),
+  ): { node?: GraphNode; cacheable: boolean } {
     const cacheKey = `${filePath}::${exportName}`
-    if (exportCache.has(cacheKey)) return exportCache.get(cacheKey)
-    if (seen.has(cacheKey)) return undefined
+    if (exportCache.has(cacheKey)) return { node: exportCache.get(cacheKey), cacheable: true }
+    if (missingExportCache.has(cacheKey)) return { cacheable: true }
+    if (seen.has(cacheKey)) return { cacheable: false }
     seen.add(cacheKey)
 
-    const file = filesByPath.get(filePath)
-    if (!file) return undefined
+    try {
+      const file = filesByPath.get(filePath)
+      if (!file) return { cacheable: true }
 
-    const binding = file.moduleInfo.exports.get(exportName)
-    let resolved: GraphNode | undefined
+      const binding = file.moduleInfo.exports.get(exportName)
+      let resolved: GraphNode | undefined
+      let cacheable = true
 
-    if (binding?.localName) {
-      resolved = file.localSymbols.get(binding.localName)
-    } else if (binding?.anonymousDefault) {
-      resolved = file.anonymousDefaultSymbol
-    } else if (binding?.source && binding.importedName) {
-      const targetFile = resolveImportTarget(filePath, binding.source)
-      if (targetFile) {
-        resolved = resolveExport(targetFile, binding.importedName, seen)
+      if (binding?.localName) {
+        resolved = file.localSymbols.get(binding.localName)
+      } else if (binding?.anonymousDefault) {
+        resolved = file.anonymousDefaultSymbol
+      } else if (binding?.source && binding.importedName) {
+        const targetFile = resolveImportTarget(filePath, binding.source)
+        if (targetFile) {
+          const result = resolveExport(targetFile, binding.importedName, seen)
+          resolved = result.node
+          cacheable = cacheable && result.cacheable
+        }
       }
-    }
 
-    if (!resolved) {
-      for (const source of file.moduleInfo.exportAllSources) {
-        const targetFile = resolveImportTarget(filePath, source)
-        if (!targetFile) continue
-        resolved = resolveExport(targetFile, exportName, seen)
-        if (resolved) break
+      if (!resolved) {
+        for (const source of file.moduleInfo.exportAllSources) {
+          const targetFile = resolveImportTarget(filePath, source)
+          if (!targetFile) continue
+          const result = resolveExport(targetFile, exportName, seen)
+          resolved = result.node
+          cacheable = cacheable && result.cacheable
+          if (resolved) break
+        }
       }
-    }
 
-    exportCache.set(cacheKey, resolved)
-    return resolved
+      if (resolved) {
+        exportCache.set(cacheKey, resolved)
+        return { node: resolved, cacheable: true }
+      }
+
+      if (cacheable) {
+        missingExportCache.add(cacheKey)
+      }
+
+      return { cacheable }
+    } finally {
+      seen.delete(cacheKey)
+    }
   }
 
   return {
@@ -193,7 +226,7 @@ export function buildProjectIndex(projectRoot: string, files: FilePassData[]): P
 
       const targetFile = resolveImportTarget(filePath, binding.source)
       if (!targetFile) return undefined
-      return resolveExport(targetFile, binding.importedName)
+      return resolveExport(targetFile, binding.importedName).node
     },
     resolveImportedMemberSymbol(filePath, namespaceName, memberName) {
       const file = filesByPath.get(filePath)
@@ -202,18 +235,10 @@ export function buildProjectIndex(projectRoot: string, files: FilePassData[]): P
 
       const targetFile = resolveImportTarget(filePath, binding.source)
       if (!targetFile) return undefined
-      return resolveExport(targetFile, memberName)
+      return resolveExport(targetFile, memberName).node
     },
     getSingleReduxStore() {
-      if (reduxStoreIds.length !== 1) return undefined
-
-      for (const file of files) {
-        for (const symbol of file.localSymbols.values()) {
-          if (symbol.id === reduxStoreIds[0]) return symbol
-        }
-      }
-
-      return undefined
+      return singleReduxStore
     },
     getAmbiguousReduxStore() {
       return {
@@ -322,11 +347,9 @@ function loadTsConfigPaths(projectRoot: string): TsConfigPaths | undefined {
 function parseTsConfigPaths(tsConfigPath: string): TsConfigPaths | undefined {
   try {
     const raw = readFileSync(tsConfigPath, 'utf-8')
-    const sanitized = raw
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/(^|[^\\:])\/\/.*$/gm, '$1')
-      .replace(/,\s*([}\]])/g, '$1')
-    const parsed = JSON.parse(sanitized)
+    const parsedResult = ts.parseConfigFileTextToJson(tsConfigPath, raw)
+    if (parsedResult.error || !parsedResult.config) return undefined
+    const parsed = parsedResult.config
     const compilerOptions = parsed?.compilerOptions ?? {}
     const rawPaths = compilerOptions?.paths
     const paths: PathAliasEntry[] = []

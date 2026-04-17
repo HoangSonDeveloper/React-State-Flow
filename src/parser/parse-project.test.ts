@@ -77,14 +77,15 @@ describe('parseProject', () => {
 
   it('resolves tsconfig path aliases when they point back into the scanned project', () => {
     const root = createProject({
-      'tsconfig.json': JSON.stringify({
-        compilerOptions: {
-          baseUrl: '.',
-          paths: {
-            '@components/*': ['src/components/*'],
+      'tsconfig.json': `{
+        // comments and trailing commas are allowed in tsconfig
+        "compilerOptions": {
+          "baseUrl": ".",
+          "paths": {
+            "@components/*": ["src/components/*"],
           },
         },
-      }),
+      }`,
       'src/components/Button.tsx': `export function Button() { return <button /> }`,
       'src/Page.tsx': `
         import { Button } from '@components/Button'
@@ -98,6 +99,61 @@ describe('parseProject', () => {
     expect(graph.edges).toContainEqual(expect.objectContaining({
       source: createNodeId('component', 'Page.tsx', 'Page'),
       target: createNodeId('component', 'components/Button.tsx', 'Button'),
+      type: 'parent-child',
+    }))
+  })
+
+  it('resolves barrel exports declared with export *', () => {
+    const root = createProject({
+      'src/components/Button.tsx': `export function Button() { return <button /> }`,
+      'src/components/index.ts': `export * from './Button'`,
+      'src/Page.tsx': `
+        import { Button } from './components'
+        export function Page() {
+          return <Button />
+        }
+      `,
+    })
+
+    const graph = parseProject(join(root, 'src'))
+    expect(graph.edges).toContainEqual(expect.objectContaining({
+      source: createNodeId('component', 'Page.tsx', 'Page'),
+      target: createNodeId('component', 'components/Button.tsx', 'Button'),
+      type: 'parent-child',
+    }))
+  })
+
+  it('does not cache negative export lookups caused by circular re-exports', () => {
+    const root = createProject({
+      'src/button.tsx': `export function Button() { return <button /> }`,
+      'src/a.ts': `
+        export * from './b'
+        export * from './button'
+      `,
+      'src/b.ts': `export * from './a'`,
+      'src/PageFromA.tsx': `
+        import { Button } from './a'
+        export function PageFromA() {
+          return <Button />
+        }
+      `,
+      'src/PageFromB.tsx': `
+        import { Button } from './b'
+        export function PageFromB() {
+          return <Button />
+        }
+      `,
+    })
+
+    const graph = parseProject(join(root, 'src'))
+    expect(graph.edges).toContainEqual(expect.objectContaining({
+      source: createNodeId('component', 'PageFromA.tsx', 'PageFromA'),
+      target: createNodeId('component', 'button.tsx', 'Button'),
+      type: 'parent-child',
+    }))
+    expect(graph.edges).toContainEqual(expect.objectContaining({
+      source: createNodeId('component', 'PageFromB.tsx', 'PageFromB'),
+      target: createNodeId('component', 'button.tsx', 'Button'),
       type: 'parent-child',
     }))
   })
@@ -142,6 +198,26 @@ describe('parseProject', () => {
       source: createNodeId('store', 'stores/b.ts', 'useUiStore'),
       target: createNodeId('component', 'Page.tsx', 'Page'),
       type: 'store-subscription',
+    }))
+  })
+
+  it('resolves namespace member JSX through imported namespace bindings', () => {
+    const root = createProject({
+      'src/components/Button.tsx': `export function Button() { return <button /> }`,
+      'src/components/index.ts': `export * from './Button'`,
+      'src/Page.tsx': `
+        import * as UI from './components'
+        export function Page() {
+          return <UI.Button />
+        }
+      `,
+    })
+
+    const graph = parseProject(join(root, 'src'))
+    expect(graph.edges).toContainEqual(expect.objectContaining({
+      source: createNodeId('component', 'Page.tsx', 'Page'),
+      target: createNodeId('component', 'components/Button.tsx', 'Button'),
+      type: 'parent-child',
     }))
   })
 })

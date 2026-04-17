@@ -25,6 +25,7 @@ export interface FileResult {
 export interface ParseFileOptions {
   detectors?: Detector[]
   project?: ProjectIndex
+  metadataOnly?: boolean
 }
 
 /**
@@ -146,12 +147,16 @@ export function parseFileFromAst(
       contextName: undefined as string | undefined,
     }
 
-    for (const detector of detectors) {
-      const enrichment = detector.enrichComponent?.(component, ctx)
-      if (!enrichment) continue
-      if (enrichment.stateSlots) features.stateSlots = enrichment.stateSlots
-      if (enrichment.isContextProvider !== undefined) features.isContextProvider = enrichment.isContextProvider
-      if (enrichment.contextName !== undefined) features.contextName = enrichment.contextName
+    if (!options.metadataOnly) {
+      for (const detector of detectors) {
+        const enrichment = detector.enrichComponent?.(component, ctx)
+        if (!enrichment) continue
+        if (enrichment.stateSlots) {
+          features.stateSlots = [...new Set([...features.stateSlots, ...enrichment.stateSlots])]
+        }
+        if (enrichment.isContextProvider !== undefined) features.isContextProvider = enrichment.isContextProvider
+        if (enrichment.contextName !== undefined) features.contextName = enrichment.contextName
+      }
     }
 
     const node: GraphNode = {
@@ -172,7 +177,9 @@ export function parseFileFromAst(
     }
   })
 
-  for (const detector of detectors) detector.detectEdges?.(ctx)
+  if (!options.metadataOnly) {
+    for (const detector of detectors) detector.detectEdges?.(ctx)
+  }
 
   return {
     nodes,
