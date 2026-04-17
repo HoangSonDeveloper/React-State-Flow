@@ -1,6 +1,6 @@
 import type * as t from '@babel/types'
 import type { GraphNode, GraphEdge, NodeType } from '../types.js'
-import type { ProjectIndex } from '../project-index.js'
+import type { ProjectIndex, RawImportBinding, ReduxHookKind } from '../project-index.js'
 
 /** Info about a component discovered in the second pass. */
 export interface ComponentInfo {
@@ -31,9 +31,12 @@ export interface ParseContext {
   addEdge(edge: GraphEdge): void
   hasNode(id: string): boolean
   addLocalSymbol(localName: string, node: GraphNode): void
+  addReduxHookAlias(localName: string, kind: ReduxHookKind): void
   setAnonymousDefaultSymbol(node: GraphNode): void
+  getImportBinding(localName: string): RawImportBinding | undefined
   resolveLocalOrImportedSymbol(localName: string, expectedType?: NodeType): GraphNode | undefined
   resolveImportedMemberSymbol(namespaceName: string, memberName: string, expectedType?: NodeType): GraphNode | undefined
+  resolveReduxHookKind(localName: string): ReduxHookKind | undefined
   getReduxSubscriptionTarget(): GraphNode
   createNodeId(type: NodeType, symbolKey: string): string
 }

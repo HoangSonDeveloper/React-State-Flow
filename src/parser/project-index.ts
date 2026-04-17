@@ -18,6 +18,8 @@ export interface RawExportBinding {
   anonymousDefault?: boolean
 }
 
+export type ReduxHookKind = 'dispatch' | 'selector'
+
 export interface RawModuleInfo {
   imports: Map<string, RawImportBinding>
   exports: Map<string, RawExportBinding>
@@ -30,6 +32,7 @@ export interface FilePassData {
   localSymbols: Map<string, GraphNode>
   anonymousDefaultSymbol?: GraphNode
   reduxStoreIds: string[]
+  reduxHookAliases: Map<string, ReduxHookKind>
 }
 
 interface PathAliasEntry {
@@ -47,6 +50,7 @@ export interface ProjectIndex {
   readonly reduxStoreIds: string[]
   resolveImportedSymbol(filePath: string, localName: string): GraphNode | undefined
   resolveImportedMemberSymbol(filePath: string, namespaceName: string, memberName: string): GraphNode | undefined
+  resolveImportedReduxHookKind(filePath: string, localName: string): ReduxHookKind | undefined
   getSingleReduxStore(): GraphNode | undefined
   getAmbiguousReduxStore(): GraphNode
 }
@@ -138,6 +142,8 @@ export function buildProjectIndex(projectRoot: string, files: FilePassData[]): P
   const resolutionCache = new Map<string, string | undefined>()
   const exportCache = new Map<string, GraphNode>()
   const missingExportCache = new Set<string>()
+  const reduxHookCache = new Map<string, ReduxHookKind>()
+  const missingReduxHookCache = new Set<string>()
   const reduxStoreIds = files.flatMap((file) => file.reduxStoreIds)
   const nodeById = new Map<string, GraphNode>()
   for (const file of files) {
@@ -217,6 +223,62 @@ export function buildProjectIndex(projectRoot: string, files: FilePassData[]): P
     }
   }
 
+  function resolveReduxHookKind(
+    filePath: string,
+    exportName: string,
+    seen = new Set<string>(),
+  ): { kind?: ReduxHookKind; cacheable: boolean } {
+    const cacheKey = `${filePath}::${exportName}`
+    if (reduxHookCache.has(cacheKey)) return { kind: reduxHookCache.get(cacheKey), cacheable: true }
+    if (missingReduxHookCache.has(cacheKey)) return { cacheable: true }
+    if (seen.has(cacheKey)) return { cacheable: false }
+    seen.add(cacheKey)
+
+    try {
+      const file = filesByPath.get(filePath)
+      if (!file) return { cacheable: true }
+
+      const binding = file.moduleInfo.exports.get(exportName)
+      let resolved: ReduxHookKind | undefined
+      let cacheable = true
+
+      if (binding?.localName) {
+        resolved = file.reduxHookAliases.get(binding.localName)
+      } else if (binding?.source && binding.importedName) {
+        const targetFile = resolveImportTarget(filePath, binding.source)
+        if (targetFile) {
+          const result = resolveReduxHookKind(targetFile, binding.importedName, seen)
+          resolved = result.kind
+          cacheable = cacheable && result.cacheable
+        }
+      }
+
+      if (!resolved) {
+        for (const source of file.moduleInfo.exportAllSources) {
+          const targetFile = resolveImportTarget(filePath, source)
+          if (!targetFile) continue
+          const result = resolveReduxHookKind(targetFile, exportName, seen)
+          resolved = result.kind
+          cacheable = cacheable && result.cacheable
+          if (resolved) break
+        }
+      }
+
+      if (resolved) {
+        reduxHookCache.set(cacheKey, resolved)
+        return { kind: resolved, cacheable: true }
+      }
+
+      if (cacheable) {
+        missingReduxHookCache.add(cacheKey)
+      }
+
+      return { cacheable }
+    } finally {
+      seen.delete(cacheKey)
+    }
+  }
+
   return {
     reduxStoreIds,
     resolveImportedSymbol(filePath, localName) {
@@ -236,6 +298,15 @@ export function buildProjectIndex(projectRoot: string, files: FilePassData[]): P
       const targetFile = resolveImportTarget(filePath, binding.source)
       if (!targetFile) return undefined
       return resolveExport(targetFile, memberName).node
+    },
+    resolveImportedReduxHookKind(filePath, localName) {
+      const file = filesByPath.get(filePath)
+      const binding = file?.moduleInfo.imports.get(localName)
+      if (!binding || binding.importedName === '*') return undefined
+
+      const targetFile = resolveImportTarget(filePath, binding.source)
+      if (!targetFile) return undefined
+      return resolveReduxHookKind(targetFile, binding.importedName).kind
     },
     getSingleReduxStore() {
       return singleReduxStore

@@ -8,12 +8,11 @@ const traverse = (_traverse as any).default ?? _traverse
 
 /**
  * Zustand detector.
- *   - Phase 1: finds `const useXxxStore = create(…)` → adds store node named XxxStore
- *     and records the hook→store mapping in `ctx.globalStores` so cross-file
- *     component files can resolve the hook in phase 2.
+ *   - Phase 1: finds `const useXxxStore = create(…)` (including aliased / generic
+ *     `create<T>()(...)` forms) → adds a store node named XxxStore.
  *     Only variables matching `use[A-Z]...` are considered; the `use` prefix is stripped
  *     to form the node id.
- *   - Phase 2: for each component, if it calls a hook registered in `ctx.globalStores`,
+ *   - Phase 2: for each component, if it calls a hook that resolves to a Zustand store,
  *     adds a store-subscription edge.
  */
 export class ZustandDetector implements Detector {
@@ -26,8 +25,7 @@ export class ZustandDetector implements Detector {
         const id = path.node.id
         if (!t.isCallExpression(init) || !t.isIdentifier(id)) return
 
-        const callee = (init as t.CallExpression).callee
-        if (!t.isIdentifier(callee, { name: 'create' })) return
+        if (!isZustandCreate(init, ctx)) return
 
         const label = stripUsePrefix(id.name)
         if (!label) return
@@ -75,4 +73,35 @@ export class ZustandDetector implements Detector {
 function stripUsePrefix(name: string): string | null {
   if (!/^use[A-Z]/.test(name)) return null
   return name.slice(3)
+}
+
+function isZustandCreate(node: t.CallExpression, ctx: ParseContext): boolean {
+  return isZustandCreateExpression(node.callee, ctx)
+}
+
+function isZustandCreateExpression(node: t.Node, ctx: ParseContext): boolean {
+  if (t.isIdentifier(node)) {
+    if (node.name === 'create') return true
+    const binding = ctx.getImportBinding(node.name)
+    return binding?.source === 'zustand' && binding.importedName === 'create'
+  }
+
+  if (
+    t.isMemberExpression(node) &&
+    t.isIdentifier(node.property, { name: 'create' }) &&
+    t.isIdentifier(node.object)
+  ) {
+    const binding = ctx.getImportBinding(node.object.name)
+    return binding?.source === 'zustand' && binding.importedName === '*'
+  }
+
+  if (t.isCallExpression(node)) {
+    return isZustandCreateExpression(node.callee, ctx)
+  }
+
+  if (t.isTSInstantiationExpression(node)) {
+    return isZustandCreateExpression(node.expression, ctx)
+  }
+
+  return false
 }

@@ -80,7 +80,7 @@ async function main() {
   const safeDevPort = parseInt(String(UI_DEV_PORT), 10)
 
   // Config script injected into every HTML response
-  const configScript = `<script>window.__RSF_EDITOR_SCHEME__=${JSON.stringify(safeEditorScheme)}</script>`
+  const configScript = `<script>window.__RSF_EDITOR_SCHEME__=${JSON.stringify(safeEditorScheme)};window.__RSF_PORT__=${JSON.stringify(port)}</script>`
 
   // Serve UI static files if built, else proxy hint
   if (existsSync(UI_DIST)) {

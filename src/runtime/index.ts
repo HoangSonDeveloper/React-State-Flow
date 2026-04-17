@@ -6,6 +6,7 @@
  */
 
 import { getRegisteredComponentId } from './registry.js'
+import { collectCommitRenderEvents } from './collect-events.js'
 import { isWastedRender } from './wasted.js'
 
 export interface RenderEvent {
@@ -96,7 +97,15 @@ function hookIntoReact(win: Window) {
       originalOnCommitFiberRoot(rendererID, root, priorityLevel)
 
       try {
-        walkFiber(win, root.current, new Set<string>())
+        const events = collectCommitRenderEvents({
+          rootFiber: root.current,
+          getFiberName,
+          getFiberComponentId,
+          incrementRenderCount,
+          isWastedRender,
+          now: () => Date.now(),
+        })
+        for (const event of events) send(win, event)
       } catch {
         // Never break the app.
       }
@@ -131,35 +140,6 @@ function getFiberName(fiber: any): string | null {
 
 function getFiberComponentId(fiber: any): string | undefined {
   return getRegisteredComponentId(fiber?.type)
-}
-
-function walkFiber(win: Window, rootFiber: any, seenInCommit: Set<string>) {
-  const stack: any[] = [rootFiber]
-
-  while (stack.length > 0) {
-    const fiber = stack.pop()
-    if (!fiber) continue
-
-    const componentName = getFiberName(fiber)
-    const componentId = getFiberComponentId(fiber)
-    const identity = componentId ?? componentName ?? null
-
-    if (componentName && /^[A-Z]/.test(componentName) && identity && !seenInCommit.has(identity)) {
-      seenInCommit.add(identity)
-      const renderCount = incrementRenderCount(identity)
-      send(win, {
-        type: 'render',
-        componentName,
-        componentId,
-        renderCount,
-        timestamp: Date.now(),
-        isWasted: isWastedRender(fiber),
-      })
-    }
-
-    if (fiber.sibling) stack.push(fiber.sibling)
-    if (fiber.child) stack.push(fiber.child)
-  }
 }
 
 function isProductionMode(): boolean {
