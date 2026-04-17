@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-04-17
+
+### Fixed
+- Runtime no longer inflates render counts for bailed-out components. The
+  commit walker now only emits an event when the fiber actually rendered
+  (new mount or a change in `memoizedProps` / `memoizedState` /
+  `dependencies` / `updateQueue` / `ref` vs. its alternate), eliminating
+  false-positive wasted-render flags on untouched subtrees.
+- CLI `--port` value is now injected into the served UI as
+  `window.__RSF_PORT__`, so the browser bridge connects to the correct
+  WebSocket when the server runs on a non-default port.
+
+### Added
+- Detector coverage for aliased and namespaced imports:
+  - Context: `React.createContext` / `React.useContext` via `import * as React`
+    and aliased named imports from `react`.
+  - Redux: aliased `useSelector` / `useDispatch` / `configureStore` / `createStore`,
+    namespace imports (`import * as redux from 'redux'`), typed wrappers
+    (`useSelector.withTypes<RootState>()`), and cross-file custom hook
+    re-exports — including arrow-wrapped forms like
+    `export const useAppSelector = (s) => useSelector(s)`.
+  - Zustand: aliased `create` imports and the curried generic form
+    `create<State>()(...)`.
+
 ## [0.4.0] — 2026-04-17
 
 ### Added
@@ -106,7 +130,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   live render counts, 800ms render flash, history replay across browser
   refreshes.
 
-[Unreleased]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.4.0...v0.4.2
 [0.4.0]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.1.1...v0.2.0
