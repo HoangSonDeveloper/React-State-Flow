@@ -119,22 +119,13 @@ function getReduxHookKindFromFunction(
   fn: t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression,
   ctx: ParseContext,
 ): ReduxHookKind | undefined {
-  let hookKind: ReduxHookKind | undefined
   const body = fn.body
 
   if (t.isExpression(body)) {
     return getReduxHookKindFromExpression(body, ctx)
   }
 
-  traverse(t.file(t.program(body.body)), {
-    noScope: true,
-    CallExpression(path: any) {
-      hookKind ??= getReduxHookKindFromExpression(path.node.callee, ctx)
-      if (hookKind) path.stop()
-    },
-  })
-
-  return hookKind
+  return getReduxHookKindFromSubtree(body, ctx)
 }
 
 function getReduxHookKindFromExpression(
@@ -142,6 +133,10 @@ function getReduxHookKindFromExpression(
   ctx: ParseContext,
 ): ReduxHookKind | undefined {
   if (!node) return undefined
+
+  if (t.isArrowFunctionExpression(node) || t.isFunctionExpression(node)) {
+    return getReduxHookKindFromFunction(node, ctx)
+  }
 
   if (t.isIdentifier(node)) {
     const localKind = ctx.resolveReduxHookKind(node.name)
@@ -196,4 +191,35 @@ function isReduxHookName(name: string): boolean {
 
 function isReduxStoreSource(source: string): boolean {
   return source === '@reduxjs/toolkit' || source === 'redux'
+}
+
+function getReduxHookKindFromSubtree(
+  node: t.Node | null | undefined,
+  ctx: ParseContext,
+): ReduxHookKind | undefined {
+  if (!node) return undefined
+
+  if (t.isCallExpression(node)) {
+    const directKind = getReduxHookKindFromExpression(node.callee, ctx)
+    if (directKind) return directKind
+  }
+
+  for (const key of t.VISITOR_KEYS[node.type] ?? []) {
+    const value = (node as unknown as Record<string, unknown>)[key]
+
+    if (Array.isArray(value)) {
+      for (const child of value) {
+        if (!child || !t.isNode(child)) continue
+        const childKind = getReduxHookKindFromSubtree(child, ctx)
+        if (childKind) return childKind
+      }
+      continue
+    }
+
+    if (!value || !t.isNode(value)) continue
+    const childKind = getReduxHookKindFromSubtree(value, ctx)
+    if (childKind) return childKind
+  }
+
+  return undefined
 }

@@ -190,6 +190,26 @@ describe('parseFile', () => {
     }))
   })
 
+  it('detects wrapped Redux hook aliases declared as arrow functions', () => {
+    const code = `
+      import { configureStore } from '@reduxjs/toolkit'
+      import { useSelector } from 'react-redux'
+      const appStore = configureStore({ reducer: rootReducer })
+      const useAppSelector = (selector) => useSelector(selector)
+      function Counter() {
+        const count = useAppSelector((s) => s.count)
+        return <div>{count}</div>
+      }
+    `
+
+    const { edges } = parseFile(code, FILE)
+    expect(edges).toContainEqual(expect.objectContaining({
+      source: createNodeId('store', FILE, 'appStore'),
+      target: createNodeId('component', FILE, 'Counter'),
+      type: 'store-subscription',
+    }))
+  })
+
   it('detects Zustand create aliases with generic curry syntax', () => {
     const code = `
       import { create as createStore } from 'zustand'
