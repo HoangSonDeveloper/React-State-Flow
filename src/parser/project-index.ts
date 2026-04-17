@@ -309,7 +309,7 @@ function resolveAliasCandidates(specifier: string, tsConfigPaths: TsConfigPaths 
       matchedPathAlias = true
       const wildcardValue = specifier.slice(prefix.length, specifier.length - suffix.length)
       for (const replacement of entry.replacements) {
-        candidates.push(resolve(baseRoot, replacement.replace('*', wildcardValue)))
+        candidates.push(resolve(baseRoot, replacement.replace(/\*/g, wildcardValue)))
       }
       continue
     }
