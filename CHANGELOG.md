@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-04-17
+
+### Added
+- Stable file/symbol-backed node IDs (`type:filepath#symbol`) — components with
+  the same name declared in different files now appear as separate nodes, and
+  runtime render events map to the exact source location.
+- Import-aware cross-file resolver with tsconfig path-alias support
+  (`@components/*`, barrel `export *`, default exports, namespace member JSX).
+- Optional Vite plugin (`react-state-flow/vite`) that injects
+  `registerComponent()` calls so the runtime can emit exact component IDs even
+  when component names are ambiguous. Anonymous `export default function() {}`
+  forms are rewritten transparently.
+- New subpath exports: `react-state-flow/runtime/register` (manual registration
+  API) and `react-state-flow/runtime/history` (shared history snapshot helper).
+- Wasted-render counts are now persisted in the server history buffer and
+  replayed to refreshed UI clients.
+- SSR-safe runtime bootstrap — `import 'react-state-flow/runtime'` is a no-op
+  under Node / SSR evaluation.
+
+### Changed
+- **Behavior change:** `/api/graph` node IDs switched from plain labels
+  (`Button`) to `type:filepath#symbol` (`component:src/Button.tsx#Button`).
+  Programmatic consumers that hardcoded label-based IDs must update their
+  lookups.
+- `vite` is declared as an optional `peerDependency` (required only when using
+  the new plugin).
+- tsconfig parsing now delegates to `jsonc-parser` for comment / trailing-comma
+  tolerance instead of an ad-hoc regex sanitizer.
+
+### Fixed
+- Duplicate component names across files are no longer collapsed into a single
+  node.
+- Runtime render events now carry a `componentId`, so the UI can map renders to
+  the correct file when multiple components share a label.
+- Circular re-export chains no longer poison the export resolver cache with
+  negative results.
+- Parser first pass runs in metadata-only mode, avoiding the previous
+  double edge-detection cost on every file.
+
 ## [0.3.0] — 2026-04-16
 
 ### Added
@@ -67,7 +106,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   live render counts, 800ms render flash, history replay across browser
   refreshes.
 
-[Unreleased]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/HoangSonDeveloper/React-State-Flow/compare/v0.1.0...v0.1.1
