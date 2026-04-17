@@ -11,6 +11,7 @@ import chokidar from 'chokidar'
 import { parseProject } from './parser/index.js'
 import type { GraphData } from './parser/index.js'
 import { parseArgs } from './cli-args.js'
+import { buildRuntimeGraphIndex, resolveRuntimeRenderEvent, type RuntimeRenderEvent } from './runtime/resolve-events.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -18,12 +19,7 @@ const UI_DIST = resolve(__dirname, '../ui/dist')
 const UI_DEV_PORT = 7273
 
 // C2: Render event history ring buffer — replayed to new UI connections
-interface StoredRenderEvent {
-  type: 'render'
-  componentName: string
-  renderCount: number
-  timestamp: number
-}
+type StoredRenderEvent = RuntimeRenderEvent
 
 const MAX_HISTORY = 1000
 const renderHistory: StoredRenderEvent[] = []
@@ -58,8 +54,10 @@ async function main() {
 
   // C3: Wrap initial parse in try-catch so server still starts on parse errors
   let graph: GraphData = { projectRoot: targetDir, nodes: [], edges: [] }
+  let runtimeGraphIndex = buildRuntimeGraphIndex(graph)
   try {
     graph = parseProject(targetDir, { ignore })
+    runtimeGraphIndex = buildRuntimeGraphIndex(graph)
     console.log(
       `  ${pc.green('✓')} Found ${pc.white(graph.nodes.length)} nodes, ${pc.white(graph.edges.length)} edges`,
     )
@@ -147,15 +145,18 @@ async function main() {
       // User app runtime connecting
       runtimeClients.add(ws)
       ws.on('message', (raw) => {
-        const str = raw.toString()
-        // C2: Store render events for history replay
+        let payload = raw.toString()
         try {
-          const evt = JSON.parse(str) as StoredRenderEvent
+          const evt = resolveRuntimeRenderEvent(
+            JSON.parse(payload) as RuntimeRenderEvent,
+            runtimeGraphIndex,
+          )
           if (evt.type === 'render') appendHistory(evt)
+          payload = JSON.stringify(evt)
         } catch {}
         // Forward to all UI clients
         for (const client of uiClients) {
-          if (client.readyState === 1) client.send(str)
+          if (client.readyState === 1) client.send(payload)
         }
       })
       ws.on('close', () => runtimeClients.delete(ws))
@@ -181,6 +182,7 @@ async function main() {
     reparsTimer = setTimeout(() => {
       try {
         graph = parseProject(targetDir, { ignore })
+        runtimeGraphIndex = buildRuntimeGraphIndex(graph)
         console.log(pc.cyan(`  [RSF] Graph updated: ${graph.nodes.length} nodes, ${graph.edges.length} edges`))
         const payload = JSON.stringify({ type: 'graph-update', graph })
         for (const client of uiClients) {

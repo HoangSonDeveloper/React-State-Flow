@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import type { RenderEvent, RuntimeState, GraphData } from './types.js'
+import { buildRuntimeHistorySnapshot } from 'react-state-flow/runtime/history'
 
 const FLASH_DURATION = 800 // ms
 
@@ -30,35 +31,36 @@ export function useRuntimeBridge(
 
   const handleEvent = useCallback(
     (event: RenderEvent) => {
+      if (!event.componentId) return
       const s = stateRef.current
 
       // Update render count
-      s.renderCounts[event.componentName] = event.renderCount
+      s.renderCounts[event.componentId] = event.renderCount
 
       // Track wasted renders
       if (event.isWasted) {
-        s.wastedCounts[event.componentName] = (s.wastedCounts[event.componentName] ?? 0) + 1
-        s.recentlyWasted.add(event.componentName)
+        s.wastedCounts[event.componentId] = (s.wastedCounts[event.componentId] ?? 0) + 1
+        s.recentlyWasted.add(event.componentId)
       } else {
-        s.recentlyWasted.delete(event.componentName)
+        s.recentlyWasted.delete(event.componentId)
       }
 
       // Mark as recently rendered
-      s.recentlyRendered.add(event.componentName)
+      s.recentlyRendered.add(event.componentId)
 
       // Clear flash after FLASH_DURATION
-      const existing = timersRef.current.get(event.componentName)
+      const existing = timersRef.current.get(event.componentId)
       if (existing) clearTimeout(existing)
       const timer = setTimeout(() => {
-        stateRef.current.recentlyRendered.delete(event.componentName)
-        stateRef.current.recentlyWasted.delete(event.componentName)
+        stateRef.current.recentlyRendered.delete(event.componentId!)
+        stateRef.current.recentlyWasted.delete(event.componentId!)
         onUpdate({
           ...stateRef.current,
           recentlyRendered: new Set(stateRef.current.recentlyRendered),
           recentlyWasted: new Set(stateRef.current.recentlyWasted),
         })
       }, FLASH_DURATION)
-      timersRef.current.set(event.componentName, timer)
+      timersRef.current.set(event.componentId, timer)
 
       onUpdate({
         ...s,
@@ -67,15 +69,6 @@ export function useRuntimeBridge(
       })
     },
     [onUpdate],
-  )
-
-  // D3: Replay historical events without triggering flash highlights
-  const handleHistoricalEvent = useCallback(
-    (event: RenderEvent) => {
-      stateRef.current.renderCounts[event.componentName] = event.renderCount
-      // deliberately skip recentlyRendered to avoid mass-flashing on reconnect
-    },
-    [],
   )
 
   useEffect(() => {
@@ -98,11 +91,13 @@ export function useRuntimeBridge(
             // D2: CLI pushed a new graph due to file change
             onGraphUpdate(msg.graph as GraphData)
           } else if (msg.type === 'history' && Array.isArray(msg.events)) {
-            // D3: Replay render history from CLI (e.g. after browser refresh)
-            for (const evt of msg.events as RenderEvent[]) {
-              if (evt.type === 'render') handleHistoricalEvent(evt)
+            const snapshot = buildRuntimeHistorySnapshot(msg.events as RenderEvent[])
+            stateRef.current = {
+              renderCounts: snapshot.renderCounts,
+              recentlyRendered: new Set(),
+              wastedCounts: snapshot.wastedCounts,
+              recentlyWasted: new Set(),
             }
-            // Emit one update with all replayed counts, no flash
             onUpdate({ ...stateRef.current, recentlyRendered: new Set(), recentlyWasted: new Set() })
           } else if (msg.type === 'reset') {
             // M2.3: server confirmed reset — clear local state + flash timers
@@ -144,7 +139,7 @@ export function useRuntimeBridge(
       wsRef.current?.close()
       timersRef.current.forEach(clearTimeout)
     }
-  }, [handleEvent, handleHistoricalEvent, onUpdate, onGraphUpdate])
+  }, [handleEvent, onUpdate, onGraphUpdate])
 
   const reset = useCallback(() => {
     const ws = wsRef.current

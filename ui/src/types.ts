@@ -29,6 +29,7 @@ export interface GraphData {
 export interface RenderEvent {
   type: 'render'
   componentName: string
+  componentId?: string
   renderCount: number
   timestamp: number
   isWasted?: boolean

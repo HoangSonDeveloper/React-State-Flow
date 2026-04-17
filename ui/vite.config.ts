@@ -7,6 +7,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   root: __dirname,
+  resolve: {
+    alias: {
+      'react-state-flow/runtime/history': resolve(__dirname, '../src/runtime/history.ts'),
+    },
+  },
   plugins: [react()],
   server: {
     port: 7273,

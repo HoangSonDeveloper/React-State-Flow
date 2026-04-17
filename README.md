@@ -55,6 +55,22 @@ createRoot(document.getElementById('root')!).render(
 
 The runtime is automatically disabled in production (`NODE_ENV=production` or Vite's `MODE=production`), so this import is safe to commit.
 
+### Step 1b — Optional: enable exact runtime IDs in Vite
+
+Zero-config mode is safe by default, but duplicate component names are treated conservatively: if two different files both export `Button`, runtime badges are hidden for those ambiguous names instead of being attached to the wrong node.
+
+If you want exact runtime tracking for duplicate names, add the optional Vite plugin:
+
+```ts
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { reactStateFlowVitePlugin } from 'react-state-flow/vite'
+
+export default defineConfig({
+  plugins: [reactStateFlowVitePlugin(), react()],
+})
+```
+
 ### Step 2 — Run the CLI
 
 ```bash
@@ -90,7 +106,7 @@ The CLI defaults to port `7272`; override with `--port`. Your app's Vite dev ser
 - **Store-subscription edges** — which components use `useSelector`/`useDispatch` or a Zustand hook
 - **Render counts** — live badge on each node showing how many times it has rendered
 - **Render flash** — green highlight for 800ms after a component re-renders
-- **Wasted renders** — orange highlight when a component re-renders but its props and state haven't changed; cumulative wasted count badge shown top-left
+- **Wasted renders** — orange highlight when a component re-renders but its props and state haven't changed; cumulative wasted count badge shown top-left, and replayed after browser refresh
 
 Click any component or context node to open it in your editor at the exact source line.
 
@@ -102,7 +118,7 @@ The graph updates automatically when you save source files (no restart needed).
 |---|---|
 | React built-in | `useState`, `useReducer` |
 | React Context | `createContext`, `useContext`, `Context.Provider` |
-| Redux Toolkit | `configureStore`, `createStore`, `useSelector`, `useDispatch` |
+| Redux Toolkit | `configureStore`, `createStore`, `useSelector`, `useDispatch` (single-store exact, multi-store shown as `ReduxStore?`) |
 | Zustand | `create()` + any `useXxxStore` hook |
 
 ## Pause & reset
@@ -135,6 +151,12 @@ import 'react-state-flow/runtime'
 ```ts
 import type { RenderEvent } from 'react-state-flow/runtime'
 ```
+
+**Runtime identity modes**
+
+- Zero-config mode resolves runtime events by component name only when that name is unique in the current graph.
+- Duplicate names stay hidden instead of being attached to the wrong node.
+- `react-state-flow/vite` upgrades runtime events with exact `componentId`s so duplicate names render correctly too.
 
 ## License
 

@@ -1,6 +1,6 @@
 {
   "name": "react-state-flow",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Visualize React component hierarchy, state flow, and real-time render events",
   "type": "module",
   "license": "MIT",
@@ -35,6 +35,18 @@
     "./runtime": {
       "import": "./dist/runtime/index.js",
       "types": "./dist/runtime/index.d.ts"
+    },
+    "./runtime/register": {
+      "import": "./dist/runtime/register.js",
+      "types": "./dist/runtime/register.d.ts"
+    },
+    "./runtime/history": {
+      "import": "./dist/runtime/history.js",
+      "types": "./dist/runtime/history.d.ts"
+    },
+    "./vite": {
+      "import": "./dist/vite.js",
+      "types": "./dist/vite.d.ts"
     }
   },
   "files": [
@@ -60,9 +72,19 @@
     "@babel/types": "^7.24.0",
     "chokidar": "^3.6.0",
     "express": "^4.19.0",
+    "jsonc-parser": "^3.3.1",
+    "magic-string": "^0.30.21",
     "open": "^10.1.0",
     "picocolors": "^1.0.1",
     "ws": "^8.17.0"
+  },
+  "peerDependencies": {
+    "vite": "^5.0.0 || ^6.0.0 || ^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@dagrejs/dagre": "^1.0.0",

@@ -1,107 +1,105 @@
 /**
  * react-state-flow/runtime
  *
- * Import này TRƯỚC khi React mount để hook vào React DevTools global hook.
- * Sends render events via WebSocket to the RSF CLI server.
- *
- * Usage:
- *   import 'react-state-flow/runtime'   // top of main.tsx / index.tsx
+ * Import this before React mounts to hook into the React DevTools global hook.
+ * The module is a safe no-op during SSR / Node imports.
  */
 
+import { getRegisteredComponentId } from './registry.js'
 import { isWastedRender } from './wasted.js'
 
 export interface RenderEvent {
   type: 'render'
   componentName: string
+  componentId?: string
   renderCount: number
   timestamp: number
-  isWasted?: boolean  // true khi props/state không đổi nhưng vẫn re-render
+  isWasted?: boolean
 }
 
 declare global {
   interface Window {
     __REACT_DEVTOOLS_GLOBAL_HOOK__: any
+    __RSF_PORT__?: number
     __RSF_WS__: WebSocket | null
   }
 }
 
-const RSF_PORT = (window as any).__RSF_PORT__ ?? 7272
-const WS_URL = `ws://localhost:${RSF_PORT}/runtime`
-
-// B2: Render counter per component with max-size cap to prevent memory leak
-const renderCounts = new Map<string, number>()
 const MAX_RENDER_COUNT_ENTRIES = 500
+const renderCounts = new Map<string, number>()
+let reconnectDelay = 2000
 
-function incrementRenderCount(name: string): number {
-  if (!renderCounts.has(name) && renderCounts.size >= MAX_RENDER_COUNT_ENTRIES) {
-    // Evict oldest entry (insertion order)
+function incrementRenderCount(identity: string): number {
+  if (!renderCounts.has(identity) && renderCounts.size >= MAX_RENDER_COUNT_ENTRIES) {
     const firstKey = renderCounts.keys().next().value
     if (firstKey !== undefined) renderCounts.delete(firstKey)
   }
-  const count = (renderCounts.get(name) ?? 0) + 1
-  renderCounts.set(name, count)
+
+  const count = (renderCounts.get(identity) ?? 0) + 1
+  renderCounts.set(identity, count)
   return count
 }
 
-function send(event: RenderEvent) {
-  if (!window.__RSF_WS__ || window.__RSF_WS__.readyState !== WebSocket.OPEN) return
-  window.__RSF_WS__.send(JSON.stringify(event))
+function getBrowserWindow(): Window | undefined {
+  if (typeof window === 'undefined') return undefined
+  return window
 }
 
-// B3: Exponential backoff reconnect
-let reconnectDelay = 2000
+function getWsUrl(win: Window): string {
+  const port = win.__RSF_PORT__ ?? 7272
+  return `ws://localhost:${port}/runtime`
+}
 
-function connect() {
-  const ws = new WebSocket(WS_URL)
-  window.__RSF_WS__ = ws
+function send(win: Window, event: RenderEvent) {
+  if (!win.__RSF_WS__ || win.__RSF_WS__.readyState !== WebSocket.OPEN) return
+  win.__RSF_WS__.send(JSON.stringify(event))
+}
+
+function connect(win: Window) {
+  const ws = new WebSocket(getWsUrl(win))
+  win.__RSF_WS__ = ws
 
   ws.addEventListener('open', () => {
-    reconnectDelay = 2000  // reset on successful connection
-    renderCounts.clear()   // B2: sync counts with server on reconnect
+    reconnectDelay = 2000
+    renderCounts.clear()
     console.debug('[RSF] Runtime connected')
   })
 
-  // M2.3: server broadcasts {type:'reset'} when UI clicks Reset; clear local
-  // counters so the next render event starts at 1 (not at the prior count + 1).
-  ws.addEventListener('message', (e) => {
+  ws.addEventListener('message', (event) => {
     try {
-      const msg = JSON.parse(e.data)
-      if (msg?.type === 'reset') renderCounts.clear()
-    } catch {}
+      const message = JSON.parse(event.data)
+      if (message?.type === 'reset') renderCounts.clear()
+    } catch {
+      // Ignore malformed control messages.
+    }
   })
 
   ws.addEventListener('close', () => {
     console.debug(`[RSF] Runtime disconnected, retrying in ${reconnectDelay / 1000}s...`)
-    setTimeout(connect, reconnectDelay)
+    setTimeout(() => connect(win), reconnectDelay)
     reconnectDelay = Math.min(reconnectDelay * 2, 30_000)
   })
 
   ws.addEventListener('error', () => {
-    // suppress — will retry on close
+    // Suppress and retry on close.
   })
 }
 
-function hookIntoReact() {
-  // React checks for this global hook on load and calls it during reconciliation
-  const existing = window.__REACT_DEVTOOLS_GLOBAL_HOOK__ ?? {}
+function hookIntoReact(win: Window) {
+  const existing = win.__REACT_DEVTOOLS_GLOBAL_HOOK__ ?? {}
+  const originalOnCommitFiberRoot = existing.onCommitFiberRoot?.bind(existing) ?? (() => {})
 
-  const originalOnCommitFiberRoot =
-    existing.onCommitFiberRoot?.bind(existing) ?? (() => {})
-
-  window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+  win.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
     ...existing,
     isDisabled: false,
     supportsFiber: true,
-
     onCommitFiberRoot(rendererID: number, root: any, priorityLevel: any) {
-      // Call through so React DevTools still works
       originalOnCommitFiberRoot(rendererID, root, priorityLevel)
 
-      // B1: Pass per-commit Set to avoid counting sibling instances multiple times
       try {
-        walkFiber(root.current, new Set<string>())
+        walkFiber(win, root.current, new Set<string>())
       } catch {
-        // Never break the app
+        // Never break the app.
       }
     },
   }
@@ -110,10 +108,9 @@ function hookIntoReact() {
 function getFiberName(fiber: any): string | null {
   const type = fiber?.type
   if (!type) return null
-  if (typeof type === 'string') return null // DOM element
+  if (typeof type === 'string') return null
   if (typeof type === 'function') return type.displayName ?? type.name ?? null
   if (typeof type === 'object' && type !== null) {
-    // forwardRef, memo, etc.
     return (
       type.displayName ??
       type.render?.displayName ??
@@ -124,20 +121,32 @@ function getFiberName(fiber: any): string | null {
   return null
 }
 
-// B1: seenInCommit prevents counting sibling instances multiple times per commit
-// Iterative walk to avoid stack overflow on deep trees (e.g. react-virtual)
-function walkFiber(rootFiber: any, seenInCommit: Set<string>) {
+function getFiberComponentId(fiber: any): string | undefined {
+  return getRegisteredComponentId(fiber?.type)
+}
+
+function walkFiber(win: Window, rootFiber: any, seenInCommit: Set<string>) {
   const stack: any[] = [rootFiber]
+
   while (stack.length > 0) {
     const fiber = stack.pop()
     if (!fiber) continue
 
-    const name = getFiberName(fiber)
-    if (name && /^[A-Z]/.test(name) && !seenInCommit.has(name)) {
-      seenInCommit.add(name)
-      const count = incrementRenderCount(name)
-      const isWasted = isWastedRender(fiber)
-      send({ type: 'render', componentName: name, renderCount: count, timestamp: Date.now(), isWasted })
+    const componentName = getFiberName(fiber)
+    const componentId = getFiberComponentId(fiber)
+    const identity = componentId ?? componentName ?? null
+
+    if (componentName && /^[A-Z]/.test(componentName) && identity && !seenInCommit.has(identity)) {
+      seenInCommit.add(identity)
+      const renderCount = incrementRenderCount(identity)
+      send(win, {
+        type: 'render',
+        componentName,
+        componentId,
+        renderCount,
+        timestamp: Date.now(),
+        isWasted: isWastedRender(fiber),
+      })
     }
 
     if (fiber.sibling) stack.push(fiber.sibling)
@@ -145,13 +154,21 @@ function walkFiber(rootFiber: any, seenInCommit: Set<string>) {
   }
 }
 
-// Bootstrap — only in development
-const isDev =
-  typeof process !== 'undefined'
-    ? process.env.NODE_ENV !== 'production'
-    : (import.meta as any).env?.MODE !== 'production'
+function isProductionMode(): boolean {
+  if (typeof process !== 'undefined' && process.env.NODE_ENV === 'production') {
+    return true
+  }
 
-if (typeof window !== 'undefined' && isDev) {
-  hookIntoReact()
-  connect()
+  const metaEnv = (import.meta as any)?.env
+  return metaEnv?.MODE === 'production'
 }
+
+function bootstrap() {
+  const win = getBrowserWindow()
+  if (!win || isProductionMode()) return
+
+  hookIntoReact(win)
+  connect(win)
+}
+
+bootstrap()
