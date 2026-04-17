@@ -7,13 +7,14 @@ import {
   type Detector,
   type ParseContext,
 } from './detectors/index.js'
-import type { ProjectIndex } from './project-index.js'
+import { collectModuleInfo, type ProjectIndex, type ReduxHookKind } from './project-index.js'
 import { createNodeId, REDUX_AMBIGUOUS_STORE_ID } from './symbol-id.js'
 
 export interface FileParseMetadata {
   anonymousDefaultSymbol?: GraphNode
   localSymbols: Map<string, GraphNode>
   reduxStoreIds: string[]
+  reduxHookAliases: Map<string, ReduxHookKind>
 }
 
 export interface FileResult {
@@ -56,7 +57,13 @@ export function parseFile(
   options: ParseFileOptions = {},
 ): FileResult {
   const ast = parseSource(code, filePath)
-  if (!ast) return { nodes: [], edges: [], metadata: { localSymbols: new Map(), reduxStoreIds: [] } }
+  if (!ast) {
+    return {
+      nodes: [],
+      edges: [],
+      metadata: { localSymbols: new Map(), reduxStoreIds: [], reduxHookAliases: new Map() },
+    }
+  }
   return parseFileFromAst(ast, filePath, options)
 }
 
@@ -74,8 +81,10 @@ export function parseFileFromAst(
   const nodeIdSet = new Set<string>()
   const edgeIdSet = new Set<string>()
   const localSymbols = new Map<string, GraphNode>()
+  const reduxHookAliases = new Map<string, ReduxHookKind>()
   let anonymousDefaultSymbol: GraphNode | undefined
   const detectors = options.detectors ?? createDefaultDetectors()
+  const moduleInfo = collectModuleInfo(ast)
 
   const ctx: ParseContext = {
     ast,
@@ -97,8 +106,14 @@ export function parseFileFromAst(
     addLocalSymbol(localName, node) {
       localSymbols.set(localName, node)
     },
+    addReduxHookAlias(localName, kind) {
+      reduxHookAliases.set(localName, kind)
+    },
     setAnonymousDefaultSymbol(node) {
       anonymousDefaultSymbol = node
+    },
+    getImportBinding(localName) {
+      return moduleInfo.imports.get(localName)
     },
     resolveLocalOrImportedSymbol(localName, expectedType) {
       const local = filterNodeType(localSymbols.get(localName), expectedType)
@@ -110,6 +125,9 @@ export function parseFileFromAst(
         options.project?.resolveImportedMemberSymbol(filePath, namespaceName, memberName),
         expectedType,
       )
+    },
+    resolveReduxHookKind(localName) {
+      return reduxHookAliases.get(localName) ?? options.project?.resolveImportedReduxHookKind(filePath, localName)
     },
     getReduxSubscriptionTarget() {
       const projectStore = options.project?.getSingleReduxStore()
@@ -192,6 +210,7 @@ export function parseFileFromAst(
           .filter((node) => node.type === 'store' && node.storeLibrary === 'redux')
           .map((node) => node.id),
       )],
+      reduxHookAliases,
     },
   }
 }

@@ -5,7 +5,8 @@ import { buildRuntimeHistorySnapshot } from 'react-state-flow/runtime/history'
 const FLASH_DURATION = 800 // ms
 
 // D6: Use RSF_PORT from window config instead of hardcoded value
-const RSF_PORT = (window as any).__RSF_PORT__ ?? 7272
+const configuredPort = Number((window as any).__RSF_PORT__)
+const RSF_PORT = Number.isFinite(configuredPort) && configuredPort > 0 ? configuredPort : 7272
 
 export interface RuntimeBridgeApi {
   /** Request a global counter reset; server broadcasts to all clients. */

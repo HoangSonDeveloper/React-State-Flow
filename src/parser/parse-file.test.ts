@@ -152,4 +152,65 @@ describe('parseFile', () => {
       type: 'component',
     }))
   })
+
+  it('detects React namespace context APIs', () => {
+    const code = `
+      import * as React from 'react'
+      const ThemeContext = React.createContext(null)
+      function Button() {
+        const theme = React.useContext(ThemeContext)
+        return <button>{theme}</button>
+      }
+    `
+
+    const { edges } = parseFile(code, FILE)
+    expect(edges).toContainEqual(expect.objectContaining({
+      source: createNodeId('context', FILE, 'ThemeContext'),
+      target: createNodeId('component', FILE, 'Button'),
+      type: 'context-subscription',
+    }))
+  })
+
+  it('detects Redux aliases imported from react-redux and toolkit', () => {
+    const code = `
+      import { configureStore as makeStore } from '@reduxjs/toolkit'
+      import { useSelector as useAppSelector } from 'react-redux'
+      const appStore = makeStore({ reducer: rootReducer })
+      function Counter() {
+        const count = useAppSelector((s) => s.count)
+        return <div>{count}</div>
+      }
+    `
+
+    const { edges } = parseFile(code, FILE)
+    expect(edges).toContainEqual(expect.objectContaining({
+      source: createNodeId('store', FILE, 'appStore'),
+      target: createNodeId('component', FILE, 'Counter'),
+      type: 'store-subscription',
+    }))
+  })
+
+  it('detects Zustand create aliases with generic curry syntax', () => {
+    const code = `
+      import { create as createStore } from 'zustand'
+      const useCountStore = createStore<{ count: number }>()(() => ({ count: 0 }))
+      function Counter() {
+        const count = useCountStore((s) => s.count)
+        return <div>{count}</div>
+      }
+    `
+
+    const { nodes, edges } = parseFile(code, FILE)
+    expect(nodes).toContainEqual(expect.objectContaining({
+      id: createNodeId('store', FILE, 'useCountStore'),
+      label: 'CountStore',
+      type: 'store',
+      storeLibrary: 'zustand',
+    }))
+    expect(edges).toContainEqual(expect.objectContaining({
+      source: createNodeId('store', FILE, 'useCountStore'),
+      target: createNodeId('component', FILE, 'Counter'),
+      type: 'store-subscription',
+    }))
+  })
 })

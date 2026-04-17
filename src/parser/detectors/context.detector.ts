@@ -29,7 +29,7 @@ export class ContextDetector implements Detector {
         if (!t.isCallExpression(init) || !t.isIdentifier(id)) return
 
         const callee = (init as t.CallExpression).callee
-        if (!t.isIdentifier(callee, { name: 'createContext' })) return
+        if (!isReactHookCall(callee, ctx, 'createContext')) return
 
         const name = id.name
         const node: GraphNode = {
@@ -56,7 +56,7 @@ export class ContextDetector implements Detector {
     component.path.traverse({
       CallExpression(innerPath: any) {
         const callee = innerPath.node.callee
-        if (!t.isIdentifier(callee, { name: 'useContext' })) return
+        if (!isReactHookCall(callee, ctx, 'useContext')) return
         const arg = innerPath.node.arguments[0]
         if (!t.isIdentifier(arg)) return
         const resolved = ctx.resolveLocalOrImportedSymbol(arg.name, 'context')
@@ -108,4 +108,28 @@ export class ContextDetector implements Detector {
 
     return { isContextProvider, contextName }
   }
+}
+
+function isReactHookCall(
+  callee: t.Node,
+  ctx: ParseContext,
+  hookName: 'createContext' | 'useContext',
+): boolean {
+  if (t.isIdentifier(callee, { name: hookName })) return true
+
+  if (t.isIdentifier(callee)) {
+    const binding = ctx.getImportBinding(callee.name)
+    return binding?.source === 'react' && binding.importedName === hookName
+  }
+
+  if (
+    t.isMemberExpression(callee) &&
+    t.isIdentifier(callee.property, { name: hookName }) &&
+    t.isIdentifier(callee.object)
+  ) {
+    const binding = ctx.getImportBinding(callee.object.name)
+    return binding?.source === 'react' && binding.importedName === '*'
+  }
+
+  return false
 }

@@ -1,6 +1,7 @@
 import _traverse from '@babel/traverse'
 import * as t from '@babel/types'
 import type { ComponentInfo, Detector, ParseContext } from './types.js'
+import type { ReduxHookKind } from '../project-index.js'
 import type { GraphNode } from '../types.js'
 import { REDUX_AMBIGUOUS_STORE_ID, createEdgeId } from '../symbol-id.js'
 
@@ -19,12 +20,15 @@ export class ReduxDetector implements Detector {
     traverse(ctx.ast, {
       VariableDeclarator: (path: any) => {
         const init = path.node.init
-        if (!t.isCallExpression(init)) return
-        const callee = (init as t.CallExpression).callee
-        if (!isReduxStoreFactory(callee)) return
-
         const id = path.node.id
         if (!t.isIdentifier(id)) return
+
+        const hookKind = getReduxHookKindFromExpression(init, ctx)
+        if (hookKind && isReduxHookName(id.name)) {
+          ctx.addReduxHookAlias(id.name, hookKind)
+        }
+
+        if (!t.isCallExpression(init) || !isReduxStoreFactory(init.callee, ctx)) return
 
         const node: GraphNode = {
           id: ctx.createNodeId('store', id.name),
@@ -39,6 +43,12 @@ export class ReduxDetector implements Detector {
         ctx.addNode(node)
         ctx.addLocalSymbol(id.name, node)
       },
+      FunctionDeclaration: (path: any) => {
+        const name = path.node.id?.name
+        if (!name || !isReduxHookName(name)) return
+        const hookKind = getReduxHookKindFromFunction(path.node, ctx)
+        if (hookKind) ctx.addReduxHookAlias(name, hookKind)
+      },
     })
   }
 
@@ -46,9 +56,7 @@ export class ReduxDetector implements Detector {
     let usesRedux = false
     component.path.traverse({
       CallExpression(innerPath: any) {
-        const callee = innerPath.node.callee
-        if (!t.isIdentifier(callee)) return
-        if (callee.name === 'useSelector' || callee.name === 'useDispatch') {
+        if (getReduxHookKindFromExpression(innerPath.node.callee, ctx)) {
           usesRedux = true
         }
       },
@@ -72,9 +80,120 @@ export class ReduxDetector implements Detector {
   }
 }
 
-function isReduxStoreFactory(callee: t.Node): boolean {
-  return (
-    t.isIdentifier(callee, { name: 'configureStore' }) ||
-    t.isIdentifier(callee, { name: 'createStore' })
-  )
+function isReduxStoreFactory(callee: t.Node, ctx: ParseContext): boolean {
+  return getReduxStoreFactoryName(callee, ctx) !== undefined
+}
+
+function getReduxStoreFactoryName(
+  callee: t.Node,
+  ctx: ParseContext,
+): 'configureStore' | 'createStore' | undefined {
+  if (t.isIdentifier(callee)) {
+    if (callee.name === 'configureStore' || callee.name === 'createStore') {
+      return callee.name
+    }
+    const binding = ctx.getImportBinding(callee.name)
+    if (!binding || !isReduxStoreSource(binding.source)) return undefined
+    if (binding.importedName === 'configureStore' || binding.importedName === 'createStore') {
+      return binding.importedName
+    }
+    return undefined
+  }
+
+  if (
+    t.isMemberExpression(callee) &&
+    t.isIdentifier(callee.property) &&
+    (callee.property.name === 'configureStore' || callee.property.name === 'createStore') &&
+    t.isIdentifier(callee.object)
+  ) {
+    const binding = ctx.getImportBinding(callee.object.name)
+    if (binding?.importedName === '*' && isReduxStoreSource(binding.source)) {
+      return callee.property.name
+    }
+  }
+
+  return undefined
+}
+
+function getReduxHookKindFromFunction(
+  fn: t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression,
+  ctx: ParseContext,
+): ReduxHookKind | undefined {
+  let hookKind: ReduxHookKind | undefined
+  const body = fn.body
+
+  if (t.isExpression(body)) {
+    return getReduxHookKindFromExpression(body, ctx)
+  }
+
+  traverse(t.file(t.program(body.body)), {
+    noScope: true,
+    CallExpression(path: any) {
+      hookKind ??= getReduxHookKindFromExpression(path.node.callee, ctx)
+      if (hookKind) path.stop()
+    },
+  })
+
+  return hookKind
+}
+
+function getReduxHookKindFromExpression(
+  node: t.Node | null | undefined,
+  ctx: ParseContext,
+): ReduxHookKind | undefined {
+  if (!node) return undefined
+
+  if (t.isIdentifier(node)) {
+    const localKind = ctx.resolveReduxHookKind(node.name)
+    if (localKind) return localKind
+
+    const binding = ctx.getImportBinding(node.name)
+    if (binding?.source === 'react-redux') {
+      if (binding.importedName === 'useDispatch') return 'dispatch'
+      if (binding.importedName === 'useSelector') return 'selector'
+    }
+
+    if (node.name === 'useDispatch') return 'dispatch'
+    if (node.name === 'useSelector') return 'selector'
+    return undefined
+  }
+
+  if (
+    t.isMemberExpression(node) &&
+    t.isIdentifier(node.property) &&
+    t.isIdentifier(node.object)
+  ) {
+    if (node.property.name === 'useDispatch' || node.property.name === 'useSelector') {
+      const binding = ctx.getImportBinding(node.object.name)
+      if (binding?.source === 'react-redux' && binding.importedName === '*') {
+        return node.property.name === 'useDispatch' ? 'dispatch' : 'selector'
+      }
+    }
+
+    if (node.property.name === 'withTypes') {
+      return getReduxHookKindFromExpression(node.object, ctx)
+    }
+  }
+
+  if (t.isCallExpression(node)) {
+    return getReduxHookKindFromExpression(node.callee, ctx)
+  }
+
+  if (t.isTSInstantiationExpression(node)) {
+    return getReduxHookKindFromExpression(node.expression, ctx)
+  }
+
+  if (t.isTSAsExpression(node) || t.isTSTypeAssertion(node)) {
+    return getReduxHookKindFromExpression(node.expression, ctx)
+  }
+
+  return undefined
+}
+
+function isReduxHookName(name: string): boolean {
+  return /^use[A-Z]/.test(name)
+}
+
+function isReduxStoreSource(source: string): boolean {
+  return source === '@reduxjs/toolkit' || source === 'redux'
 }

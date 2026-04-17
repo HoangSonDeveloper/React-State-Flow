@@ -220,4 +220,32 @@ describe('parseProject', () => {
       type: 'parent-child',
     }))
   })
+
+  it('resolves exported custom Redux hooks across files', () => {
+    const root = createProject({
+      'src/store.ts': `
+        import { configureStore } from '@reduxjs/toolkit'
+        export const appStore = configureStore({ reducer: rootReducer })
+      `,
+      'src/hooks.ts': `
+        import { useDispatch, useSelector } from 'react-redux'
+        export const useAppDispatch = useDispatch.withTypes<AppDispatch>()
+        export const useAppSelector = useSelector
+      `,
+      'src/Page.tsx': `
+        import { useAppSelector } from './hooks'
+        export function Page() {
+          const count = useAppSelector((s) => s.count)
+          return <div>{count}</div>
+        }
+      `,
+    })
+
+    const graph = parseProject(join(root, 'src'))
+    expect(graph.edges).toContainEqual(expect.objectContaining({
+      source: createNodeId('store', 'store.ts', 'appStore'),
+      target: createNodeId('component', 'Page.tsx', 'Page'),
+      type: 'store-subscription',
+    }))
+  })
 })

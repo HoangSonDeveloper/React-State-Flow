@@ -59,6 +59,7 @@ export function parseProject(projectRoot: string, options: ParseProjectOptions =
       localSymbols: parsed.metadata.localSymbols,
       anonymousDefaultSymbol: parsed.metadata.anonymousDefaultSymbol,
       reduxStoreIds: parsed.metadata.reduxStoreIds,
+      reduxHookAliases: parsed.metadata.reduxHookAliases,
     }
   })
 
